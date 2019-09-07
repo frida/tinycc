@@ -1,0 +1,63 @@
+﻿<?xml version="1.0" encoding="utf-8"?>
+<Project ToolsVersion="4.0" xmlns="http://schemas.microsoft.com/developer/msbuild/2003">
+  <ItemGroup>
+    <ClCompile Include="libtcc.c">
+      <Filter>common</Filter>
+    </ClCompile>
+    <ClCompile Include="tccpp.c">
+      <Filter>common</Filter>
+    </ClCompile>
+    <ClCompile Include="tccgen.c">
+      <Filter>common</Filter>
+    </ClCompile>
+    <ClCompile Include="tccelf.c">
+      <Filter>common</Filter>
+    </ClCompile>
+    <ClCompile Include="tccpe.c">
+      <Filter>common</Filter>
+    </ClCompile>
+    <ClCompile Include="tccasm.c">
+      <Filter>common</Filter>
+    </ClCompile>
+    <ClCompile Include="tccrun.c">
+      <Filter>common</Filter>
+    </ClCompile>
+    <ClCompile Include="x86_64-gen.c">
+      <Filter>arch</Filter>
+    </ClCompile>
+    <ClCompile Include="x86_64-link.c">
+      <Filter>arch</Filter>
+    </ClCompile>
+    <ClCompile Include="i386-asm.c">
+      <Filter>arch</Filter>
+    </ClCompile>
+  </ItemGroup>
+  <ItemGroup>
+    <ClInclude Include="tcc.h">
+      <Filter>common</Filter>
+    </ClInclude>
+    <ClInclude Include="libtcc.h">
+      <Filter>common</Filter>
+    </ClInclude>
+    <ClInclude Include="tcctok.h">
+      <Filter>common</Filter>
+    </ClInclude>
+    <ClInclude Include="pregenerated\config.h">
+      <Filter>common</Filter>
+    </ClInclude>
+    <ClInclude Include="x86_64-asm.h">
+      <Filter>arch</Filter>
+    </ClInclude>
+    <ClInclude Include="i386-asm.h">
+      <Filter>arch</Filter>
+    </ClInclude>
+  </ItemGroup>
+  <ItemGroup>
+    <Filter Include="common">
+      <UniqueIdentifier>{af9a3b4b-eea1-4eb0-9ec7-f290af91c0e8}</UniqueIdentifier>
+    </Filter>
+    <Filter Include="arch">
+      <UniqueIdentifier>{b337daa9-a177-46df-9a46-a2925a64a3e1}</UniqueIdentifier>
+    </Filter>
+  </ItemGroup>
+</Project>

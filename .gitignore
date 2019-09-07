@@ -12,6 +12,7 @@
 *.log
 *.bz2
 *.zip
+*.user
 .gdb_history
 a.out
 tcc_g

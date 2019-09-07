@@ -1,0 +1,28 @@
+<?xml version="1.0" encoding="utf-8"?>
+<Project DefaultTargets="Build" ToolsVersion="4.0" xmlns="http://schemas.microsoft.com/developer/msbuild/2003">
+
+  <ItemDefinitionGroup>
+    <ClCompile>
+      <PreprocessorDefinitions>ONE_SOURCE=0;TCC_TARGET_PE;%(PreprocessorDefinitions)</PreprocessorDefinitions>
+      <AdditionalIncludeDirectories>$(ProjectDir)pregenerated;%(AdditionalIncludeDirectories)</AdditionalIncludeDirectories>
+      <DisableSpecificWarnings>4057;4152;4201;4214;4245;4324;4389;4456;4457;4459;4701;4706;%(DisableSpecificWarnings)</DisableSpecificWarnings>
+    </ClCompile>
+  </ItemDefinitionGroup>
+
+  <ItemGroup>
+    <ClInclude Include="tcc.h" />
+    <ClInclude Include="libtcc.h" />
+    <ClInclude Include="tcctok.h" />
+    <ClInclude Include="pregenerated\config.h" />
+  </ItemGroup>
+  <ItemGroup>
+    <ClCompile Include="libtcc.c" />
+    <ClCompile Include="tccpp.c" />
+    <ClCompile Include="tccgen.c" />
+    <ClCompile Include="tccelf.c" />
+    <ClCompile Include="tccpe.c" />
+    <ClCompile Include="tccasm.c" />
+    <ClCompile Include="tccrun.c" />
+  </ItemGroup>
+
+</Project>
