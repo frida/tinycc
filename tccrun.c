@@ -26,6 +26,9 @@
 #ifndef _WIN32
 # include <sys/mman.h>
 #endif
+#ifdef __APPLE__
+# include <libkern/OSCacheControl.h>
+#endif
 
 #ifdef CONFIG_TCC_BACKTRACE
 # ifndef _WIN32
@@ -292,7 +295,12 @@ static void set_pages_executable(void *ptr, unsigned long length)
         tcc_error("mprotect failed: did you mean to configure --with-selinux?");
 # endif
 # if defined TCC_TARGET_ARM || defined TCC_TARGET_ARM64
+#  ifdef __APPLE__
+    sys_icache_invalidate(ptr, length);
+    sys_dcache_flush(ptr, length);
+#  else
     __clear_cache(ptr, (char *)ptr + length);
+#  endif
 # endif
 #endif
 }
@@ -702,11 +710,19 @@ static int rt_get_caller_pc(addr_t *paddr, ucontext_t *uc, int level)
     if (level < 0)
         return -1;
     else if (level == 0) {
+#if defined(__APPLE__)
+        *paddr = uc->uc_mcontext->__ss.__pc;
+#else
         *paddr = uc->uc_mcontext.pc;
+#endif
         return 0;
     }
     else {
+#if defined(__APPLE__)
+        addr_t *fp = (addr_t *)uc->uc_mcontext->__ss.__fp;
+#else
         addr_t *fp = (addr_t *)uc->uc_mcontext.regs[29];
+#endif
         int i;
         for (i = 1; i < level; i++)
             fp = (addr_t *)fp[0];
