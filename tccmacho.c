@@ -362,7 +362,9 @@ static void check_relocs(TCCState *s1, struct macho *mo)
                                       R_X86_64_GOTPCREL, sym_index);
                     }
                     rel->r_info = ELFW(R_INFO)(mo->stubsym, type);
+#if SHT_RELX == SHT_RELA
                     rel->r_addend += attr->plt_offset;
+#endif
                 }
             }
         }

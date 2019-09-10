@@ -402,8 +402,11 @@ ST_FUNC int gfunc_sret(CType *vt, int variadic, CType *ret, int *ret_align, int 
    parameters and the function address. */
 ST_FUNC void gfunc_call(int nb_args)
 {
+    int align_placeholder_offset, stack_align_delta, saved_ind;
     int size, align, r, args_size, i, func_call;
     Sym *func_sym;
+
+    align_placeholder_offset = oad(0xec81, 0); /* sub $xxx, %esp */
     
 #ifdef CONFIG_TCC_BCHECK
     if (tcc_state->do_bounds_check)
@@ -500,6 +503,14 @@ ST_FUNC void gfunc_call(int nb_args)
     else if ((vtop->type.ref->type.t & VT_BTYPE) == VT_STRUCT)
         args_size -= 4;
 #endif
+
+    stack_align_delta = ((args_size + 15) & -16) - args_size;
+    args_size += stack_align_delta;
+
+    saved_ind = ind;
+    ind = align_placeholder_offset;
+    o(stack_align_delta);
+    ind = saved_ind;
 
     gcall_or_jmp(0);
 
@@ -608,8 +619,15 @@ ST_FUNC void gfunc_epilog(void)
         gen_bounds_epilog();
 #endif
 
-    /* align local size to word & save local variables */
-    v = (-loc + 3) & -4;
+    /* align local size & save local variables */
+    v = -loc;
+    if (v <= 8) {
+        v = 8;
+    } else {
+        addr_t align_remainder = (v - 8) % 16;
+        if (align_remainder != 0)
+            v += 16 - align_remainder;
+    }
 
 #if USE_EBX
     o(0x8b);

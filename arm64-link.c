@@ -104,12 +104,19 @@ ST_FUNC unsigned create_plt_entry(TCCState *s1, unsigned got_offset, struct sym_
 ST_FUNC void relocate_plt(TCCState *s1)
 {
     uint8_t *p, *p_end;
+    uint32_t br_flags;
 
     if (!s1->plt)
       return;
 
     p = s1->plt->data;
     p_end = p + s1->plt->data_offset;
+
+#ifdef HAVE_PTRAUTH
+    br_flags = 0x81f; // br => braaz
+#else
+    br_flags = 0;
+#endif
 
     if (p < p_end) {
         uint64_t plt = s1->plt->sh_addr;
@@ -124,7 +131,7 @@ ST_FUNC void relocate_plt(TCCState *s1)
 			  (got & 0xff8) << 7));
         write32le(p + 12, (0x91000210 | // add x16,x16,#...
 			   (got & 0xfff) << 10));
-        write32le(p + 16, 0xd61f0220); // br x17
+        write32le(p + 16, 0xd61f0220 | br_flags); // br x17
         write32le(p + 20, 0xd503201f); // nop
         write32le(p + 24, 0xd503201f); // nop
         write32le(p + 28, 0xd503201f); // nop
@@ -141,7 +148,7 @@ ST_FUNC void relocate_plt(TCCState *s1)
 			      (addr & 0xff8) << 7));
             write32le(p + 8, (0x91000210 | // add x16,x16,#...
 			      (addr & 0xfff) << 10));
-            write32le(p + 12, 0xd61f0220); // br x17
+            write32le(p + 12, 0xd61f0220 | br_flags); // br x17
             p += 16;
         }
     }

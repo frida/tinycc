@@ -3675,10 +3675,14 @@ static void tcc_predefs(CString *cstr)
     "#define __builtin_va_start(ap,last) (ap=((char*)&(last))+((sizeof(last)+3)&~3))\n"
     "#define __builtin_va_arg(ap,type) (ap=(void*)((_tcc_align(ap,type)+sizeof(type)+3)&~3),*(type*)(ap-((sizeof(type)+3)&~3)))\n"
 #elif defined TCC_TARGET_ARM64
+# if defined(__APPLE__)
+    "typedef char*__builtin_va_list;\n"
+# else
     "typedef struct{\n"
     "void*__stack,*__gr_top,*__vr_top;\n"
     "int __gr_offs,__vr_offs;\n"
     "}__builtin_va_list;\n"
+# endif
 #elif defined TCC_TARGET_RISCV64
     "typedef char*__builtin_va_list;\n"
     "#define __va_reg_size (__riscv_xlen>>3)\n"

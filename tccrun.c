@@ -51,6 +51,9 @@ static void rt_exit(int code);
 /* defined when included from lib/bt-exe.c */
 #ifndef CONFIG_TCC_BACKTRACE_ONLY
 
+#ifdef __APPLE__
+# include <libkern/OSCacheControl.h>
+#endif
 #ifndef _WIN32
 # include <sys/mman.h>
 #endif
@@ -61,6 +64,10 @@ static int tcc_relocate_ex(TCCState *s1, void *ptr, addr_t ptr_diff);
 #ifdef _WIN64
 static void *win64_add_function_table(TCCState *s1);
 static void win64_del_function_table(void *);
+#endif
+
+#ifdef __APPLE__
+static addr_t cached_page_size = 0;
 #endif
 
 /* ------------------------------------------------------------- */
@@ -294,9 +301,15 @@ static int tcc_relocate_ex(TCCState *s1, void *ptr, addr_t ptr_diff)
             memset(ptr, 0, length);
         else
             memcpy(ptr, s->data, length);
-        /* mark executable sections as executable in memory */
+    }
+
+    /* mark executable sections as executable in memory */
+    for(i = 1; i < s1->nb_sections; i++) {
+        s = s1->sections[i];
+        if (0 == (s->sh_flags & SHF_ALLOC))
+            continue;
         if (s->sh_flags & SHF_EXECINSTR)
-            set_pages_executable(s1, (char*)((addr_t)ptr + ptr_diff), length);
+            set_pages_executable(s1, (char*)s->sh_addr, s->data_offset);
     }
 
 #ifdef _WIN64
@@ -317,18 +330,30 @@ static void set_pages_executable(TCCState *s1, void *ptr, unsigned long length)
 #else
     void __clear_cache(void *beginning, void *end);
 # ifndef HAVE_SELINUX
-    addr_t start, end;
-#  ifndef PAGESIZE
-#   define PAGESIZE 4096
+    addr_t start, end, pagesize;
+#  ifdef __APPLE__
+    if (0 == cached_page_size)
+        cached_page_size = getpagesize();
+    pagesize = cached_page_size;
+#  else
+#   ifndef PAGESIZE
+#    define PAGESIZE 4096
+#   endif
+    pagesize = PAGESIZE;
 #  endif
-    start = (addr_t)ptr & ~(PAGESIZE - 1);
+    start = (addr_t)ptr & ~(pagesize - 1);
     end = (addr_t)ptr + length;
-    end = (end + PAGESIZE - 1) & ~(PAGESIZE - 1);
-    if (mprotect((void *)start, end - start, PROT_READ | PROT_WRITE | PROT_EXEC))
+    end = (end + pagesize - 1) & ~(pagesize - 1);
+    if (mprotect((void *)start, end - start, PROT_READ | PROT_EXEC))
         tcc_error("mprotect failed: did you mean to configure --with-selinux?");
 # endif
 # if defined TCC_TARGET_ARM || defined TCC_TARGET_ARM64
+#  ifdef __APPLE__
+    sys_icache_invalidate(ptr, length);
+    sys_dcache_flush(ptr, length);
+#  else
     __clear_cache(ptr, (char *)ptr + length);
+#  endif
 # endif
 #endif
 }
@@ -653,11 +678,24 @@ static void rt_getcontext(ucontext_t *uc, rt_context *rc)
     rc->fp = uc->uc_mcontext.gregs[REG_RBP];
 # endif
 #elif defined(__arm__)
+# if defined(__APPLE__)
+    rc->ip = uc->uc_mcontext->__ss.__pc;
+    rc->fp = uc->uc_mcontext->__ss.__r[11];
+# else
     rc->ip = uc->uc_mcontext.arm_pc;
     rc->fp = uc->uc_mcontext.arm_fp;
+# endif
 #elif defined(__aarch64__)
+# if defined(__APPLE__) && defined(__DARWIN_OPAQUE_ARM_THREAD_STATE64)
+    rc->ip = __darwin_arm_thread_state64_get_pc(uc->uc_mcontext->__ss);
+    rc->fp = __darwin_arm_thread_state64_get_fp(uc->uc_mcontext->__ss);
+# elif defined(__APPLE__)
+    rc->ip = uc->uc_mcontext->__ss.__pc;
+    rc->fp = uc->uc_mcontext->__ss.__fp;
+# else
     rc->ip = uc->uc_mcontext.pc;
     rc->fp = uc->uc_mcontext.regs[29];
+# endif
 #elif defined(__riscv)
     rc->ip = uc->uc_mcontext.__gregs[REG_PC];
     rc->fp = uc->uc_mcontext.__gregs[REG_S0];

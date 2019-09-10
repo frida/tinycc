@@ -5834,6 +5834,32 @@ ST_FUNC void unary(void)
         vtop->type.t = VT_VOID;
         break;
     }
+#ifdef HAVE_PTRAUTH
+    case TOK___arm64_ptrauth_strip_i:
+        parse_builtin_params(0, "e");
+        gen_ptrauth_strip_i();
+        break;
+    case TOK___arm64_ptrauth_strip_d:
+        parse_builtin_params(0, "e");
+        gen_ptrauth_strip_d();
+        break;
+    case TOK___arm64_ptrauth_sign_ia:
+        parse_builtin_params(0, "ee");
+        gen_ptrauth_sign_ia();
+        break;
+    case TOK___arm64_ptrauth_sign_ib:
+        parse_builtin_params(0, "ee");
+        gen_ptrauth_sign_ib();
+        break;
+    case TOK___arm64_ptrauth_sign_da:
+        parse_builtin_params(0, "ee");
+        gen_ptrauth_sign_da();
+        break;
+    case TOK___arm64_ptrauth_sign_db:
+        parse_builtin_params(0, "ee");
+        gen_ptrauth_sign_db();
+        break;
+#endif
 #endif
 
     /* pre operations */

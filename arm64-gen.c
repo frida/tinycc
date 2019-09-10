@@ -69,7 +69,11 @@ ST_DATA const int reg_classes[NB_REGS] = {
   RC_INT | RC_R(15),
   RC_INT | RC_R(16),
   RC_INT | RC_R(17),
+#ifdef __APPLE__
+  RC_R(18),
+#else
   RC_INT | RC_R(18),
+#endif
   RC_R30, // not in RC_INT as we make special use of x30
   RC_FLOAT | RC_F(0),
   RC_FLOAT | RC_F(1),
@@ -528,7 +532,19 @@ ST_FUNC void load(int r, SValue *sv)
     }
 
     if (svr == (VT_CONST | VT_SYM)) {
-        arm64_sym(intr(r), sv->sym, svcul);
+        int ir;
+        Sym *sym;
+
+        ir = intr(r);
+        sym = sv->sym;
+
+        arm64_sym(ir, sym, svcul);
+
+#ifdef HAVE_PTRAUTH
+        if ((sym->type.t & VT_BTYPE) == VT_FUNC && svcul == 0)
+            o(0xdac123e0 | ir); // paciza
+#endif
+
         return;
     }
 
@@ -651,10 +667,19 @@ static void arm64_gen_bl_or_b(int b)
 	o(0x14000000 | (uint32_t)!b << 31); // b/bl .
     }
     else {
+        uint32_t br_flags;
+
 #ifdef CONFIG_TCC_BCHECK
         vtop->r &= ~VT_MUSTBOUND;
 #endif
-        o(0xd61f0000 | (uint32_t)!b << 21 | intr(gv(RC_R30)) << 5); // br/blr
+
+        br_flags = (uint32_t)!b << 21 | intr(gv(RC_R30)) << 5; // br/blr
+
+#ifdef HAVE_PTRAUTH
+        br_flags |= 0x81f; // br/blr => braaz/blraaz
+#endif
+
+        o(0xd61f0000 | br_flags);
     }
 }
 
@@ -795,16 +820,55 @@ static int arm64_hfa(CType *type, unsigned *fsize)
     return 0;
 }
 
-static unsigned long arm64_pcs_aux(int n, CType **type, unsigned long *a)
+typedef struct PCSAlloc PCSAlloc;
+
+enum {
+    PCS_VOID,
+    PCS_IREG,
+    PCS_FREG,
+    PCS_STACK
+} PCSType;
+
+struct PCSAlloc {
+    unsigned long
+    type     : 2,
+    value    : 61,
+    indirect : 1;
+};
+
+#define PCS_ALLOC_MAKE_VOID() (PCSAlloc) { PCS_VOID, 0, 0 }
+#define PCS_ALLOC_MAKE_IREG(v) (PCSAlloc) { PCS_IREG, v, 0 }
+#define PCS_ALLOC_MAKE_FREG(v) (PCSAlloc) { PCS_FREG, v, 0 }
+#define PCS_ALLOC_MAKE_STACK(v) (PCSAlloc) { PCS_STACK, v, 0 }
+
+#define PCS_ALLOC_MAKE_IREG_INDIRECT(v) (PCSAlloc) { PCS_IREG, v, 1 }
+#define PCS_ALLOC_MAKE_STACK_INDIRECT(v) (PCSAlloc) { PCS_STACK, v, 1 }
+
+static unsigned long arm64_pcs_aux(int n, int nb_fixed, CType **type,
+                                   PCSAlloc *a)
 {
     int nx = 0; // next integer register
     int nv = 0; // next vector register
-    unsigned long ns = 32; // next stack offset
+    unsigned long ns = 0; // next stack offset
     int i;
+    int align_and_enlarge_small = 1;
+
+#ifdef __APPLE__
+    align_and_enlarge_small = 0;
+#endif
 
     for (i = 0; i < n; i++) {
         int hfa = arm64_hfa(type[i], 0);
         int size, align;
+
+#ifdef __APPLE__
+        if (i == nb_fixed) {
+            nx = 8;
+            nv = 8;
+
+            align_and_enlarge_small = 1;
+        }
+#endif
 
         if ((type[i]->t & VT_ARRAY) ||
             (type[i]->t & VT_BTYPE) == VT_FUNC)
@@ -817,11 +881,11 @@ static unsigned long arm64_pcs_aux(int n, CType **type, unsigned long *a)
             ;
         else if (size > 16) {
             // B.3: replace with pointer
-            if (nx < 8)
-                a[i] = nx++ << 1 | 1;
-            else {
+            if (nx < 8) {
+                a[i] = PCS_ALLOC_MAKE_IREG_INDIRECT(nx++);
+            } else {
                 ns = (ns + 7) & ~7;
-                a[i] = ns | 1;
+                a[i] = PCS_ALLOC_MAKE_STACK_INDIRECT(ns);
                 ns += 8;
             }
             continue;
@@ -832,13 +896,13 @@ static unsigned long arm64_pcs_aux(int n, CType **type, unsigned long *a)
 
         // C.1
         if (is_float(type[i]->t) && nv < 8) {
-            a[i] = 16 + (nv++ << 1);
+            a[i] = PCS_ALLOC_MAKE_FREG(nv++);
             continue;
         }
 
         // C.2
         if (hfa && nv + hfa <= 8) {
-            a[i] = 16 + (nv << 1);
+            a[i] = PCS_ALLOC_MAKE_FREG(nv);
             nv += hfa;
             continue;
         }
@@ -851,7 +915,8 @@ static unsigned long arm64_pcs_aux(int n, CType **type, unsigned long *a)
 
         // C.4
         if (hfa || (type[i]->t & VT_BTYPE) == VT_LDOUBLE) {
-            ns = (ns + 7) & ~7;
+            if (align_and_enlarge_small)
+                ns = (ns + 7) & ~7;
             ns = (ns + align - 1) & -align;
         }
 
@@ -861,31 +926,33 @@ static unsigned long arm64_pcs_aux(int n, CType **type, unsigned long *a)
 
         // C.6
         if (hfa || is_float(type[i]->t)) {
-            a[i] = ns;
+            a[i] = PCS_ALLOC_MAKE_STACK(ns);
             ns += size;
             continue;
         }
 
         // C.7
         if ((type[i]->t & VT_BTYPE) != VT_STRUCT && size <= 8 && nx < 8) {
-            a[i] = nx++ << 1;
+            a[i] = PCS_ALLOC_MAKE_IREG(nx++);
             continue;
         }
 
         // C.8
+#ifndef __APPLE__
         if (align == 16)
             nx = (nx + 1) & ~1;
+#endif
 
         // C.9
         if ((type[i]->t & VT_BTYPE) != VT_STRUCT && size == 16 && nx < 7) {
-            a[i] = nx << 1;
+            a[i] = PCS_ALLOC_MAKE_IREG(nx);
             nx += 2;
             continue;
         }
 
         // C.10
         if ((type[i]->t & VT_BTYPE) == VT_STRUCT && size <= (8 - nx) * 8) {
-            a[i] = nx << 1;
+            a[i] = PCS_ALLOC_MAKE_IREG(nx);
             nx += (size + 7) >> 3;
             continue;
         }
@@ -894,42 +961,44 @@ static unsigned long arm64_pcs_aux(int n, CType **type, unsigned long *a)
         nx = 8;
 
         // C.12
-        ns = (ns + 7) & ~7;
+        if (align_and_enlarge_small)
+            ns = (ns + 7) & ~7;
         ns = (ns + align - 1) & -align;
 
         // C.13
         if ((type[i]->t & VT_BTYPE) == VT_STRUCT) {
-            a[i] = ns;
+            a[i] = PCS_ALLOC_MAKE_STACK(ns);
             ns += size;
             continue;
         }
 
         // C.14
-        if (size < 8)
+        if (align_and_enlarge_small && size < 8)
             size = 8;
 
         // C.15
-        a[i] = ns;
+        a[i] = PCS_ALLOC_MAKE_STACK(ns);
         ns += size;
     }
 
-    return ns - 32;
+    return ns;
 }
 
-static unsigned long arm64_pcs(int n, CType **type, unsigned long *a)
+static unsigned long arm64_pcs(int n, int nb_fixed, CType **type, PCSAlloc *a)
 {
     unsigned long stack;
 
     // Return type:
     if ((type[0]->t & VT_BTYPE) == VT_VOID)
-        a[0] = -1;
+        a[0] = PCS_ALLOC_MAKE_VOID();
     else {
-        arm64_pcs_aux(1, type, a);
-        assert(a[0] == 0 || a[0] == 1 || a[0] == 16);
+        arm64_pcs_aux(1, -1, type, a);
+        assert((a[0].type == PCS_IREG && a[0].value == 0) ||
+               (a[0].type == PCS_FREG && a[0].value == 0 && !a[0].indirect));
     }
 
     // Argument types:
-    stack = arm64_pcs_aux(n, type + 1, a + 1);
+    stack = arm64_pcs_aux(n, nb_fixed, type + 1, a + 1);
 
     if (0) {
         int i;
@@ -938,17 +1007,19 @@ static unsigned long arm64_pcs(int n, CType **type, unsigned long *a)
                 printf("arm64_pcs return: ");
             else
                 printf("arm64_pcs arg %d: ", i);
-            if (a[i] == (unsigned long)-1)
+            if (a[i].type == PCS_VOID)
                 printf("void\n");
-            else if (a[i] == 1 && !i)
+            else if (a[i].indirect && !i)
                 printf("X8 pointer\n");
-            else if (a[i] < 16)
-                printf("X%lu%s\n", a[i] / 2, a[i] & 1 ? " pointer" : "");
-            else if (a[i] < 32)
-                printf("V%lu\n", a[i] / 2 - 8);
+            else if (a[i].type == PCS_IREG)
+                printf("X%lu%s\n", (unsigned long)a[i].value,
+                       a[i].indirect ? " pointer" : "");
+            else if (a[i].type == PCS_FREG)
+                printf("V%lu\n", (unsigned long)a[i].value);
             else
                 printf("stack %lu%s\n",
-                       (a[i] - 32) & ~1, a[i] & 1 ? " pointer" : "");
+                       (unsigned long)a[i].value,
+                       a[i].indirect ? " pointer" : "");
         }
     }
 
@@ -957,9 +1028,12 @@ static unsigned long arm64_pcs(int n, CType **type, unsigned long *a)
 
 ST_FUNC void gfunc_call(int nb_args)
 {
+    Sym *return_sym;
+    int nb_fixed;
     CType *return_type;
     CType **t;
-    unsigned long *a, *a1;
+    PCSAlloc *a;
+    unsigned long *a1;
     unsigned long stack;
     int i;
 
@@ -968,7 +1042,19 @@ ST_FUNC void gfunc_call(int nb_args)
         gbound_args(nb_args);
 #endif
 
-    return_type = &vtop[-nb_args].type.ref->type;
+    return_sym = vtop[-nb_args].type.ref;
+
+    if (return_sym->f.func_type == FUNC_ELLIPSIS) {
+        Sym *cur;
+
+        nb_fixed = 0;
+        for (cur = return_sym->next; cur; cur = cur->next)
+            nb_fixed++;
+    } else {
+        nb_fixed = -1;
+    }
+
+    return_type = &return_sym->type;
     if ((return_type->t & VT_BTYPE) == VT_STRUCT)
         --nb_args;
 
@@ -980,11 +1066,11 @@ ST_FUNC void gfunc_call(int nb_args)
     for (i = 0; i < nb_args; i++)
         t[nb_args - i] = &vtop[-i].type;
 
-    stack = arm64_pcs(nb_args, t, a);
+    stack = arm64_pcs(nb_args, nb_fixed, t, a);
 
     // Allocate space for structs replaced by pointer:
     for (i = nb_args; i; i--)
-        if (a[i] & 1) {
+        if (a[i].indirect) {
             SValue *arg = &vtop[i - nb_args];
             int align, size = type_size(&arg->type, &align);
             assert((arg->type.t & VT_BTYPE) == VT_STRUCT);
@@ -1006,25 +1092,25 @@ ST_FUNC void gfunc_call(int nb_args)
     for (i = nb_args; i; i--) {
         vpushv(vtop - nb_args + i);
 
-        if (a[i] & 1) {
+        if (a[i].indirect) {
             // struct replaced by pointer
             int r = get_reg(RC_INT);
             arm64_spoff(intr(r), a1[i]);
             vset(&vtop->type, r | VT_LVAL, 0);
             vswap();
             vstore();
-            if (a[i] >= 32) {
+            if (a[i].type == PCS_STACK) {
                 // pointer on stack
                 r = get_reg(RC_INT);
                 arm64_spoff(intr(r), a1[i]);
-                arm64_strx(3, intr(r), 31, (a[i] - 32) >> 1 << 1);
+                arm64_strx(3, intr(r), 31, a[i].value);
             }
         }
-        else if (a[i] >= 32) {
+        else if (a[i].type == PCS_STACK) {
             // value on stack
             if ((vtop->type.t & VT_BTYPE) == VT_STRUCT) {
                 int r = get_reg(RC_INT);
-                arm64_spoff(intr(r), a[i] - 32);
+                arm64_spoff(intr(r), a[i].value);
                 vset(&vtop->type, r | VT_LVAL, 0);
                 vswap();
                 vstore();
@@ -1032,12 +1118,20 @@ ST_FUNC void gfunc_call(int nb_args)
             else if (is_float(vtop->type.t)) {
                 gv(RC_FLOAT);
                 arm64_strv(arm64_type_size(vtop[0].type.t),
-                           fltr(vtop[0].r), 31, a[i] - 32);
+                           fltr(vtop[0].r), 31, a[i].value);
             }
             else {
+                int size;
+
                 gv(RC_INT);
-                arm64_strx(arm64_type_size(vtop[0].type.t),
-                           intr(vtop[0].r), 31, a[i] - 32);
+
+                size = arm64_type_size(vtop[0].type.t);
+                // caller must zero-extend up to 32 bits
+                if (size < 2 && nb_fixed != -1 && i > nb_fixed)
+                    size = 2;
+
+                arm64_strx(size,
+                           intr(vtop[0].r), 31, a[i].value);
             }
         }
 
@@ -1046,24 +1140,24 @@ ST_FUNC void gfunc_call(int nb_args)
 
     // Second pass: assign values to registers
     for (i = nb_args; i; i--, vtop--) {
-        if (a[i] < 16 && !(a[i] & 1)) {
+        if (a[i].type == PCS_IREG && !a[i].indirect) {
             // value in general-purpose registers
             if ((vtop->type.t & VT_BTYPE) == VT_STRUCT) {
                 int align, size = type_size(&vtop->type, &align);
                 if (size) {
                     vtop->type.t = VT_PTR;
                     gaddrof();
-                    gv(RC_R(a[i] / 2));
-                    arm64_ldrs(a[i] / 2, size);
+                    gv(RC_R(a[i].value));
+                    arm64_ldrs(a[i].value, size);
                 }
             }
             else
-                gv(RC_R(a[i] / 2));
+                gv(RC_R(a[i].value));
         }
-        else if (a[i] < 16)
+        else if (a[i].type == PCS_IREG)
             // struct replaced by pointer in register
-            arm64_spoff(a[i] / 2, a1[i]);
-        else if (a[i] < 32) {
+            arm64_spoff(a[i].value, a1[i]);
+        else if (a[i].type == PCS_FREG) {
             // value in floating-point registers
             if ((vtop->type.t & VT_BTYPE) == VT_STRUCT) {
                 uint32_t j, sz, n = arm64_hfa(&vtop->type, &sz);
@@ -1073,16 +1167,16 @@ ST_FUNC void gfunc_call(int nb_args)
                 for (j = 0; j < n; j++)
                     o(0x3d4003c0 |
                       (sz & 16) << 19 | -(sz & 8) << 27 | (sz & 4) << 29 |
-                      (a[i] / 2 - 8 + j) |
+                      (a[i].value + j) |
                       j << 10); // ldr ([sdq])(*),[x30,#(j * sz)]
             }
             else
-                gv(RC_F(a[i] / 2 - 8));
+                gv(RC_F(a[i].value));
         }
     }
 
     if ((return_type->t & VT_BTYPE) == VT_STRUCT) {
-        if (a[0] == 1) {
+        if (a[0].indirect) {
             // indirect return: set x8 and discard the stack value
             gv(RC_R(8));
             --vtop;
@@ -1103,11 +1197,11 @@ ST_FUNC void gfunc_call(int nb_args)
     {
         int rt = return_type->t;
         int bt = rt & VT_BTYPE;
-        if (bt == VT_STRUCT && !(a[0] & 1)) {
+        if (bt == VT_STRUCT && !a[0].indirect) {
             // A struct was returned in registers, so write it out:
             gv(RC_R(8));
             --vtop;
-            if (a[0] == 0) {
+            if (a[0].type == PCS_IREG) {
                 int align, size = type_size(return_type, &align);
                 assert(size <= 16);
                 if (size > 8)
@@ -1116,12 +1210,12 @@ ST_FUNC void gfunc_call(int nb_args)
                     arm64_strx(size > 4 ? 3 : size > 2 ? 2 : size > 1, 0, 8, 0);
 
             }
-            else if (a[0] == 16) {
+            else if (a[0].type == PCS_FREG) {
                 uint32_t j, sz, n = arm64_hfa(return_type, &sz);
                 for (j = 0; j < n; j++)
                     o(0x3d000100 |
                       (sz & 16) << 19 | -(sz & 8) << 27 | (sz & 4) << 29 |
-                      (a[i] / 2 - 8 + j) |
+                      (a[i].value + j) |
                       j << 10); // str ([sdq])(*),[x8,#(j * sz)]
             }
         }
@@ -1133,8 +1227,10 @@ ST_FUNC void gfunc_call(int nb_args)
 }
 
 static unsigned long arm64_func_va_list_stack;
+#ifndef __APPLE__
 static int arm64_func_va_list_gr_offs;
 static int arm64_func_va_list_vr_offs;
+#endif
 static int arm64_func_sub_sp_offset;
 
 ST_FUNC void gfunc_prolog(Sym *func_sym)
@@ -1144,7 +1240,7 @@ ST_FUNC void gfunc_prolog(Sym *func_sym)
     int i = 0;
     Sym *sym;
     CType **t;
-    unsigned long *a;
+    PCSAlloc *a;
 
     func_vc = 144; // offset of where x8 is stored
 
@@ -1156,7 +1252,7 @@ ST_FUNC void gfunc_prolog(Sym *func_sym)
     for (sym = func_type->ref; sym; sym = sym->next)
         t[i++] = &sym->type;
 
-    arm64_func_va_list_stack = arm64_pcs(n - 1, t, a);
+    arm64_func_va_list_stack = arm64_pcs(n - 1, -1, t, a);
 
     o(0xa9b27bfd); // stp x29,x30,[sp,#-224]!
     o(0xad0087e0); // stp q0,q1,[sp,#16]
@@ -1169,35 +1265,39 @@ ST_FUNC void gfunc_prolog(Sym *func_sym)
     o(0xa90c17e4); // stp x4,x5,[sp,#192]
     o(0xa90d1fe6); // stp x6,x7,[sp,#208]
 
+#ifndef __APPLE__
     arm64_func_va_list_gr_offs = -64;
     arm64_func_va_list_vr_offs = -128;
+#endif
 
     for (i = 1, sym = func_type->ref->next; sym; i++, sym = sym->next) {
-        int off = (a[i] < 16 ? 160 + a[i] / 2 * 8 :
-                   a[i] < 32 ? 16 + (a[i] - 16) / 2 * 16 :
-                   224 + ((a[i] - 32) >> 1 << 1));
+        int off = (a[i].type == PCS_IREG ? 160 + a[i].value * 8 :
+                   a[i].type == PCS_FREG ? 16 + a[i].value * 16 :
+                   224 + a[i].value);
         sym_push(sym->v & ~SYM_FIELD, &sym->type,
-                 (a[i] & 1 ? VT_LLOCAL : VT_LOCAL) | VT_LVAL,
+                 (a[i].indirect ? VT_LLOCAL : VT_LOCAL) | VT_LVAL,
                  off);
 
-        if (a[i] < 16) {
+#ifndef __APPLE__
+        if (a[i].type == PCS_IREG) {
             int align, size = type_size(&sym->type, &align);
-            arm64_func_va_list_gr_offs = (a[i] / 2 - 7 +
-                                          (!(a[i] & 1) && size > 8)) * 8;
+            arm64_func_va_list_gr_offs = (a[i].value - 7 +
+                                          (!a[i].indirect && size > 8)) * 8;
         }
-        else if (a[i] < 32) {
+        else if (a[i].type == PCS_FREG) {
             uint32_t hfa = arm64_hfa(&sym->type, 0);
-            arm64_func_va_list_vr_offs = (a[i] / 2 - 16 +
+            arm64_func_va_list_vr_offs = (a[i].value - 8 +
                                           (hfa ? hfa : 1)) * 16;
         }
+#endif
 
         // HFAs of float and double need to be written differently:
-        if (16 <= a[i] && a[i] < 32 && (sym->type.t & VT_BTYPE) == VT_STRUCT) {
+        if (a[i].type == PCS_FREG && (sym->type.t & VT_BTYPE) == VT_STRUCT) {
             uint32_t j, sz, k = arm64_hfa(&sym->type, &sz);
             if (sz < 16)
                 for (j = 0; j < k; j++) {
                     o(0x3d0003e0 | -(sz & 8) << 27 | (sz & 4) << 29 |
-                      ((a[i] - 16) / 2 + j) | (off / sz + j) << 10);
+                      (a[i].value + j) | (off / sz + j) << 10);
                     // str ([sdq])(*),[sp,#(j * sz)]
                 }
         }
@@ -1234,6 +1334,7 @@ ST_FUNC void gen_va_start(void)
         o(0x910383be); // add x30,x29,#224
     o(0xf900001e | r << 5); // str x30,[x(r)]
 
+#ifndef __APPLE__
     if (arm64_func_va_list_gr_offs) {
         if (arm64_func_va_list_stack)
             o(0x910383be); // add x30,x29,#224
@@ -1250,6 +1351,7 @@ ST_FUNC void gen_va_start(void)
 
     arm64_movimm(30, arm64_func_va_list_vr_offs);
     o(0xb9001c1e | r << 5); // str w30,[x(r),#28]
+#endif
 
     --vtop;
 }
@@ -1273,6 +1375,7 @@ ST_FUNC void gen_va_arg(CType *t)
 
     if (!hfa) {
         uint32_t n = size > 16 ? 8 : (size + 7) & -8;
+#ifndef __APPLE__
         o(0xb940181e | r0 << 5); // ldr w30,[x(r0),#24] // __gr_offs
         if (align == 16) {
             assert(0); // this path untested but needed for __uint128_t
@@ -1281,23 +1384,28 @@ ST_FUNC void gen_va_arg(CType *t)
         }
         o(0x310003c0 | r1 | n << 10); // adds w(r1),w30,#(n)
         o(0x540000ad); // b.le .+20
+#endif
         o(0xf9400000 | r1 | r0 << 5); // ldr x(r1),[x(r0)] // __stack
         o(0x9100001e | r1 << 5 | n << 10); // add x30,x(r1),#(n)
         o(0xf900001e | r0 << 5); // str x30,[x(r0)] // __stack
+#ifndef __APPLE__
         o(0x14000004); // b .+16
         o(0xb9001800 | r1 | r0 << 5); // str w(r1),[x(r0),#24] // __gr_offs
         o(0xf9400400 | r1 | r0 << 5); // ldr x(r1),[x(r0),#8] // __gr_top
         o(0x8b3ec000 | r1 | r1 << 5); // add x(r1),x(r1),w30,sxtw
+#endif
         if (size > 16)
             o(0xf9400000 | r1 | r1 << 5); // ldr x(r1),[x(r1)]
     }
     else {
-        uint32_t rsz = hfa << 4;
         uint32_t ssz = (size + 7) & -(uint32_t)8;
+#ifndef __APPLE__
+        uint32_t rsz = hfa << 4;
         uint32_t b1, b2;
         o(0xb9401c1e | r0 << 5); // ldr w30,[x(r0),#28] // __vr_offs
         o(0x310003c0 | r1 | rsz << 10); // adds w(r1),w30,#(rsz)
         b1 = ind; o(0x5400000d); // b.le lab1
+#endif
         o(0xf9400000 | r1 | r0 << 5); // ldr x(r1),[x(r0)] // __stack
         if (fsize == 16) {
             o(0x91003c00 | r1 | r1 << 5); // add x(r1),x(r1),#15
@@ -1305,6 +1413,7 @@ ST_FUNC void gen_va_arg(CType *t)
         }
         o(0x9100001e | r1 << 5 | ssz << 10); // add x30,x(r1),#(ssz)
         o(0xf900001e | r0 << 5); // str x30,[x(r0)] // __stack
+#ifndef __APPLE__
         b2 = ind; o(0x14000000); // b lab2
         // lab1:
         write32le(cur_text_section->data + b1, 0x5400000d | (ind - b1) << 3);
@@ -1328,6 +1437,7 @@ ST_FUNC void gen_va_arg(CType *t)
         }
         // lab2:
         write32le(cur_text_section->data + b2, 0x14000000 | (ind - b2) >> 2);
+#endif
     }
 }
 
@@ -1340,13 +1450,13 @@ ST_FUNC int gfunc_sret(CType *vt, int variadic, CType *ret,
 ST_FUNC void gfunc_return(CType *func_type)
 {
     CType *t = func_type;
-    unsigned long a;
+    PCSAlloc a;
 
-    arm64_pcs(0, &t, &a);
-    switch (a) {
-    case -1:
-        break;
-    case 0:
+    arm64_pcs(0, -1, &t, &a);
+
+    if (a.type == PCS_VOID) {
+    }
+    else if (a.type == PCS_IREG && !a.indirect) {
         if ((func_type->t & VT_BTYPE) == VT_STRUCT) {
             int align, size = type_size(func_type, &align);
             gaddrof();
@@ -1355,17 +1465,16 @@ ST_FUNC void gfunc_return(CType *func_type)
         }
         else
             gv(RC_IRET);
-        break;
-    case 1: {
+    }
+    else if (a.indirect) {
         CType type = *func_type;
         mk_pointer(&type);
         vset(&type, VT_LOCAL | VT_LVAL, func_vc);
         indir();
         vswap();
         vstore();
-        break;
     }
-    case 16:
+    else if (a.type == PCS_FREG) {
         if ((func_type->t & VT_BTYPE) == VT_STRUCT) {
           uint32_t j, sz, n = arm64_hfa(&vtop->type, &sz);
           gaddrof();
@@ -1377,8 +1486,8 @@ ST_FUNC void gfunc_return(CType *func_type)
         }
         else
             gv(RC_FRET);
-        break;
-    default:
+    }
+    else {
       assert(0);
     }
     vtop--;
@@ -2069,6 +2178,128 @@ ST_FUNC void gen_vla_alloc(CType *type, int align) {
 #endif
 }
 
+#ifdef HAVE_PTRAUTH
+ST_FUNC void gen_ptrauth_strip_i(void)
+{
+    CType type;
+    uint32_t r_dst, r_src;
+
+    type = vtop->type;
+    r_src = intr(gv(RC_INT));
+    vpop();
+
+    r_dst = get_reg(RC_INT);
+
+    o(0xaa0003e0 | r_dst | r_src << 16); // mov x(r_dst), x(r_src)
+    o(0xdac143e0 | r_dst); // xpaci x(r_dst)
+
+    vpushi(0);
+    vtop->r = r_dst;
+    vtop->type = type;
+}
+
+ST_FUNC void gen_ptrauth_strip_d(void)
+{
+    CType type;
+    uint32_t r_dst, r_src;
+
+    type = vtop->type;
+    r_src = intr(gv(RC_INT));
+    r_dst = get_reg(RC_INT);
+
+    o(0xaa0003e0 | r_dst | r_src << 16); // mov x(r_dst), x(r_src)
+    o(0xdac147e0 | r_dst); // xpacd x(r_dst)
+
+    vpop();
+    vpushi(0);
+    vtop->r = r_dst;
+    vtop->type = type;
+}
+
+ST_FUNC void gen_ptrauth_sign_ia(void)
+{
+    CType type;
+    uint32_t r_dst, r_src, r_data;
+
+    gv2(RC_INT, RC_INT);
+    r_src = vtop[-1].r;
+    r_data = vtop[0].r;
+    type = vtop[-1].type;
+    r_dst = get_reg(RC_INT);
+
+    o(0xaa0003e0 | r_dst | r_src << 16); // mov x(r_dst), x(r_src)
+    o(0xdac10000 | r_dst | r_data << 5); // pacia x(r_dst), x(r_data)
+
+    vpop();
+    vpop();
+    vpushi(0);
+    vtop->r = r_dst;
+    vtop->type = type;
+}
+
+ST_FUNC void gen_ptrauth_sign_ib(void)
+{
+    CType type;
+    uint32_t r_dst, r_src, r_data;
+
+    gv2(RC_INT, RC_INT);
+    r_src = vtop[-1].r;
+    r_data = vtop[0].r;
+    type = vtop[-1].type;
+    r_dst = get_reg(RC_INT);
+
+    o(0xaa0003e0 | r_dst | r_src << 16); // mov x(r_dst), x(r_src)
+    o(0xdac10400 | r_dst | r_data << 5); // pacib x(r_dst), x(r_data)
+
+    vpop();
+    vpop();
+    vpushi(0);
+    vtop->r = r_dst;
+    vtop->type = type;
+}
+
+ST_FUNC void gen_ptrauth_sign_da(void)
+{
+    CType type;
+    uint32_t r_dst, r_src, r_data;
+
+    gv2(RC_INT, RC_INT);
+    r_src = vtop[-1].r;
+    r_data = vtop[0].r;
+    type = vtop[-1].type;
+    r_dst = get_reg(RC_INT);
+
+    o(0xaa0003e0 | r_dst | r_src << 16); // mov x(r_dst), x(r_src)
+    o(0xdac10800 | r_dst | r_data << 5); // pacda x(r_dst), x(r_data)
+
+    vpop();
+    vpop();
+    vpushi(0);
+    vtop->r = r_dst;
+    vtop->type = type;
+}
+
+ST_FUNC void gen_ptrauth_sign_db(void)
+{
+    CType type;
+    uint32_t r_dst, r_src, r_data;
+
+    gv2(RC_INT, RC_INT);
+    r_src = vtop[-1].r;
+    r_data = vtop[0].r;
+    type = vtop[-1].type;
+    r_dst = get_reg(RC_INT);
+
+    o(0xaa0003e0 | r_dst | r_src << 16); // mov x(r_dst), x(r_src)
+    o(0xdac10c00 | r_dst | r_data << 5); // pacdb x(r_dst), x(r_data)
+
+    vpop();
+    vpop();
+    vpushi(0);
+    vtop->r = r_dst;
+    vtop->type = type;
+}
+#endif
 /* end of A64 code generator */
 /*************************************************************/
 #endif

@@ -863,6 +863,9 @@ LIBTCCAPI TCCState *tcc_new(void)
 #endif
 #elif defined(TCC_TARGET_ARM64)
     tcc_define_symbol(s, "__aarch64__", NULL);
+#if defined(HAVE_PTRAUTH)
+    tcc_define_symbol(s, "__PTRAUTH_INTRINSICS__", NULL);
+#endif
 #elif defined TCC_TARGET_C67
     tcc_define_symbol(s, "__C67__", NULL);
 #elif defined TCC_TARGET_RISCV64
@@ -886,6 +889,9 @@ LIBTCCAPI TCCState *tcc_new(void)
 #else
     tcc_define_symbol(s, "__unix__", NULL);
     tcc_define_symbol(s, "__unix", NULL);
+# if defined(__APPLE__)
+    tcc_define_symbol(s, "__APPLE__", NULL);
+# endif
 # if defined(__linux__)
     tcc_define_symbol(s, "__linux__", NULL);
     tcc_define_symbol(s, "__linux", NULL);

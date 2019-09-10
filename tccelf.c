@@ -20,6 +20,10 @@
 
 #include "tcc.h"
 
+#ifdef HAVE_PTRAUTH
+#include <ptrauth.h>
+#endif
+
 /* Define this to get some debug output during relocation processing.  */
 #undef DEBUG_RELOC
 
@@ -493,6 +497,7 @@ ST_FUNC int find_elf_sym(Section *s, const char *name)
    name if FORC */
 ST_FUNC addr_t get_sym_addr(TCCState *s1, const char *name, int err, int forc)
 {
+    addr_t value;
     int sym_index;
     ElfW(Sym) *sym;
     char buf[256];
@@ -513,7 +518,14 @@ ST_FUNC addr_t get_sym_addr(TCCState *s1, const char *name, int err, int forc)
             tcc_error("%s not defined", name);
         return (addr_t)-1;
     }
-    return sym->st_value;
+    value = sym->st_value;
+#ifdef HAVE_PTRAUTH
+    if (ELFW(ST_TYPE)(sym->st_info) == STT_FUNC) {
+        value = (addr_t)ptrauth_sign_unauthenticated((void*)(uintptr_t)value,
+                                                     ptrauth_key_asia, 0);
+    }
+#endif
+    return value;
 }
 
 /* return elf symbol value */
@@ -532,6 +544,7 @@ ST_FUNC void list_elf_symbols(TCCState *s, void *ctx,
     int sym_index, end_sym;
     const char *name;
     unsigned char sym_vis, sym_bind;
+    void *sym_val;
 
     symtab = s->symtab;
     end_sym = symtab->data_offset / sizeof (ElfSym);
@@ -541,8 +554,16 @@ ST_FUNC void list_elf_symbols(TCCState *s, void *ctx,
             name = (char *) symtab->link->data + sym->st_name;
             sym_bind = ELFW(ST_BIND)(sym->st_info);
             sym_vis = ELFW(ST_VISIBILITY)(sym->st_other);
-            if (sym_bind == STB_GLOBAL && sym_vis == STV_DEFAULT)
-                symbol_cb(ctx, name, (void*)(uintptr_t)sym->st_value);
+            if (sym_bind == STB_GLOBAL && sym_vis == STV_DEFAULT) {
+                sym_val = (void*)(uintptr_t)sym->st_value;
+#ifdef HAVE_PTRAUTH
+                if (ELFW(ST_TYPE)(sym->st_info) == STT_FUNC) {
+                    sym_val = ptrauth_sign_unauthenticated(sym_val,
+                                                           ptrauth_key_asia, 0);
+                }
+#endif
+                symbol_cb(ctx, name, sym_val);
+            }
         }
     }
 }
