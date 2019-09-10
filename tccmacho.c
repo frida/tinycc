@@ -764,7 +764,9 @@ static void check_relocs(TCCState *s1, struct macho *mo)
                         mo->nr_plt++;
                     }
                     rel->r_info = ELFW(R_INFO)(mo->stubsym, type);
+#if SHT_RELX == SHT_RELA
                     rel->r_addend += attr->plt_offset;
+#endif
                 }
             }
 	    if (type == R_DATA_PTR || type == R_JMP_SLOT)

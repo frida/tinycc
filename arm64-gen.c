@@ -58,6 +58,9 @@ ST_DATA const char * const target_machine_defs =
     "__arm64__\0"
 #endif
     "__AARCH64EL__\0"
+#if defined(HAVE_PTRAUTH)
+    "__PTRAUTH_INTRINSICS__\0"
+#endif
     ;
 
 ST_DATA const int reg_classes[NB_REGS] = {
@@ -560,7 +563,14 @@ ST_FUNC void load(int r, SValue *sv)
     }
 
     if (svr == (VT_CONST | VT_SYM)) {
-        arm64_sym(intr(r), sv->sym, svcul);
+        int ir = intr(r);
+        Sym *sym = sv->sym;
+
+        arm64_sym(ir, sym, svcul);
+#ifdef HAVE_PTRAUTH
+        if ((sym->type.t & VT_BTYPE) == VT_FUNC && svcul == 0)
+            o(0xdac123e0 | ir); // paciza
+#endif
         return;
     }
 
@@ -679,7 +689,11 @@ static void arm64_gen_bl_or_b(int b)
 #ifdef CONFIG_TCC_BCHECK
         vtop->r &= ~VT_MUSTBOUND;
 #endif
-        o((b ? ARM64_BR : ARM64_BLR) | intr(gv(RC_R30)) << 5); // br/blr
+        uint32_t br = (b ? ARM64_BR : ARM64_BLR) | intr(gv(RC_R30)) << 5; // br/blr
+#ifdef HAVE_PTRAUTH
+        br |= 0x81f; // braaz/blraaz
+#endif
+        o(br);
     }
 }
 
@@ -807,12 +821,22 @@ static int arm64_hfa(CType *type, unsigned *fsize)
     return 0;
 }
 
+/* Stack slots are encoded as 32 + (offset << 1) so that bit 0 can still carry the
+   indirect flag, Apple's packing having made odd offsets possible. */
+#define PCS_STACK(ns) (32 + (((ns) - 32) << 1))
+#define PCS_STACK_OFFSET(a) (((a) - 32) >> 1)
+
 static unsigned long arm64_pcs_aux(int variadic, int n, CType **type, unsigned long *a)
 {
     int nx = 0; // next integer register
     int nv = 0; // next vector register
     unsigned long ns = 32; // next stack offset
     int i;
+    int align_and_enlarge_small = 1;
+
+#if defined(TCC_TARGET_MACHO)
+    align_and_enlarge_small = 0;
+#endif
 
     for (i = 0; i < n; i++) {
         int hfa = arm64_hfa(type[i], 0);
@@ -828,7 +852,8 @@ static unsigned long arm64_pcs_aux(int variadic, int n, CType **type, unsigned l
         if (variadic && i == variadic) {
             nx = 8;
             nv = 8;
-	}
+            align_and_enlarge_small = 1;
+        }
 
 #elif defined(TCC_TARGET_PE)
         if (variadic && i >= variadic) {
@@ -846,7 +871,7 @@ static unsigned long arm64_pcs_aux(int variadic, int n, CType **type, unsigned l
                 a[i] = nx++ << 1 | 1;
             else {
                 ns = (ns + 7) & ~7;
-                a[i] = ns | 1;
+                a[i] = PCS_STACK(ns) | 1;
                 ns += 8;
             }
             continue;
@@ -876,7 +901,8 @@ static unsigned long arm64_pcs_aux(int variadic, int n, CType **type, unsigned l
 
         // C.4
         if (hfa || bt == VT_LDOUBLE) {
-            ns = (ns + 7) & ~7;
+            if (align_and_enlarge_small)
+                ns = (ns + 7) & ~7;
             ns = (ns + align - 1) & -align;
         }
 
@@ -886,7 +912,7 @@ static unsigned long arm64_pcs_aux(int variadic, int n, CType **type, unsigned l
 
         // C.6
         if (hfa || is_float(bt)) {
-            a[i] = ns;
+            a[i] = PCS_STACK(ns);
             ns += size;
             continue;
         }
@@ -898,8 +924,10 @@ static unsigned long arm64_pcs_aux(int variadic, int n, CType **type, unsigned l
         }
 
         // C.8
+#if !defined(TCC_TARGET_MACHO)
         if (align == 16)
             nx = (nx + 1) & ~1;
+#endif
 
         // C.9
         if (bt != VT_STRUCT && size == 16 && nx < 7) {
@@ -919,22 +947,23 @@ static unsigned long arm64_pcs_aux(int variadic, int n, CType **type, unsigned l
         nx = 8;
 
         // C.12
-        ns = (ns + 7) & ~7;
+        if (align_and_enlarge_small)
+            ns = (ns + 7) & ~7;
         ns = (ns + align - 1) & -align;
 
         // C.13
         if (bt == VT_STRUCT) {
-            a[i] = ns;
+            a[i] = PCS_STACK(ns);
             ns += size;
             continue;
         }
 
         // C.14
-        if (size < 8)
+        if (align_and_enlarge_small && size < 8)
             size = 8;
 
         // C.15
-        a[i] = ns;
+        a[i] = PCS_STACK(ns);
         ns += size;
     }
 
@@ -973,7 +1002,7 @@ static unsigned long arm64_pcs(int variadic, int n, CType **type, unsigned long 
                 printf("V%lu\n", a[i] / 2 - 8);
             else
                 printf("stack %lu%s\n",
-                       (a[i] - 32) & ~1, a[i] & 1 ? " pointer" : "");
+                       (unsigned long)PCS_STACK_OFFSET(a[i]), a[i] & 1 ? " pointer" : "");
         }
     }
 
@@ -1089,14 +1118,14 @@ ST_FUNC void gfunc_call(int nb_args)
                 // pointer on stack
                 r = get_reg(RC_INT);
                 arm64_spoff(intr(r), a1[i]);
-                arm64_strx(3, intr(r), 31, (a[i] - 32) >> 1 << 1);
+                arm64_strx(3, intr(r), 31, PCS_STACK_OFFSET(a[i]));
             }
         }
         else if (a[i] >= 32) {
             // value on stack
             if ((vtop->type.t & VT_BTYPE) == VT_STRUCT) {
                 int r = get_reg(RC_INT);
-                arm64_spoff(intr(r), a[i] - 32);
+                arm64_spoff(intr(r), PCS_STACK_OFFSET(a[i]));
                 vset(&vtop->type, r | VT_LVAL, 0);
                 vswap();
                 vstore();
@@ -1104,12 +1133,21 @@ ST_FUNC void gfunc_call(int nb_args)
             else if (is_float(vtop->type.t)) {
                 gv(RC_FLOAT);
                 arm64_strv(arm64_type_size(vtop[0].type.t),
-                           fltr(vtop[0].r), 31, a[i] - 32);
+                           fltr(vtop[0].r), 31, PCS_STACK_OFFSET(a[i]));
             }
             else {
+                int size;
+
                 gv(RC_INT);
-                arm64_strx(3, // arm64_type_size(vtop[0].type.t),
-                           intr(vtop[0].r), 31, a[i] - 32);
+#if defined(TCC_TARGET_MACHO)
+                size = arm64_type_size(vtop[0].type.t);
+                // caller must zero-extend up to 32 bits
+                if (size < 2 && variadic && i > var_nb_arg)
+                    size = 2;
+#else
+                size = 3;
+#endif
+                arm64_strx(size, intr(vtop[0].r), 31, PCS_STACK_OFFSET(a[i]));
             }
         }
 
@@ -1226,7 +1264,7 @@ static unsigned long arm64_pe_param_off(unsigned long a)
 {
     return a < 16 ? 160 + a / 2 * 8 :
            a < 32 ? 16 + (a - 16) / 2 * 16 :
-           224 + ((a - 32) >> 1 << 1);
+           224 + PCS_STACK_OFFSET(a);
 }
 #endif
 
@@ -1317,7 +1355,7 @@ ST_FUNC void gfunc_prolog(Sym *func_sym)
     for (i = 1, sym = func_type->ref->next; sym; i++, sym = sym->next) {
         int off = (a[i] < 16 ? 160 + a[i] / 2 * 8 :
                    a[i] < 32 ? 16 + (a[i] - 16) / 2 * 16 :
-                   224 + ((a[i] - 32) >> 1 << 1));
+                   224 + PCS_STACK_OFFSET(a[i]));
 
         gfunc_set_param(sym, off, a[i] & 1);
 
@@ -2280,6 +2318,128 @@ ST_FUNC void gen_vla_alloc(CType *type, int align) {
 #endif
 }
 
+#ifdef HAVE_PTRAUTH
+ST_FUNC void gen_ptrauth_strip_i(void)
+{
+    CType type;
+    uint32_t r_dst, r_src;
+
+    type = vtop->type;
+    r_src = intr(gv(RC_INT));
+    vpop();
+
+    r_dst = get_reg(RC_INT);
+
+    o(0xaa0003e0 | r_dst | r_src << 16); // mov x(r_dst), x(r_src)
+    o(0xdac143e0 | r_dst); // xpaci x(r_dst)
+
+    vpushi(0);
+    vtop->r = r_dst;
+    vtop->type = type;
+}
+
+ST_FUNC void gen_ptrauth_strip_d(void)
+{
+    CType type;
+    uint32_t r_dst, r_src;
+
+    type = vtop->type;
+    r_src = intr(gv(RC_INT));
+    r_dst = get_reg(RC_INT);
+
+    o(0xaa0003e0 | r_dst | r_src << 16); // mov x(r_dst), x(r_src)
+    o(0xdac147e0 | r_dst); // xpacd x(r_dst)
+
+    vpop();
+    vpushi(0);
+    vtop->r = r_dst;
+    vtop->type = type;
+}
+
+ST_FUNC void gen_ptrauth_sign_ia(void)
+{
+    CType type;
+    uint32_t r_dst, r_src, r_data;
+
+    gv2(RC_INT, RC_INT);
+    r_src = vtop[-1].r;
+    r_data = vtop[0].r;
+    type = vtop[-1].type;
+    r_dst = get_reg(RC_INT);
+
+    o(0xaa0003e0 | r_dst | r_src << 16); // mov x(r_dst), x(r_src)
+    o(0xdac10000 | r_dst | r_data << 5); // pacia x(r_dst), x(r_data)
+
+    vpop();
+    vpop();
+    vpushi(0);
+    vtop->r = r_dst;
+    vtop->type = type;
+}
+
+ST_FUNC void gen_ptrauth_sign_ib(void)
+{
+    CType type;
+    uint32_t r_dst, r_src, r_data;
+
+    gv2(RC_INT, RC_INT);
+    r_src = vtop[-1].r;
+    r_data = vtop[0].r;
+    type = vtop[-1].type;
+    r_dst = get_reg(RC_INT);
+
+    o(0xaa0003e0 | r_dst | r_src << 16); // mov x(r_dst), x(r_src)
+    o(0xdac10400 | r_dst | r_data << 5); // pacib x(r_dst), x(r_data)
+
+    vpop();
+    vpop();
+    vpushi(0);
+    vtop->r = r_dst;
+    vtop->type = type;
+}
+
+ST_FUNC void gen_ptrauth_sign_da(void)
+{
+    CType type;
+    uint32_t r_dst, r_src, r_data;
+
+    gv2(RC_INT, RC_INT);
+    r_src = vtop[-1].r;
+    r_data = vtop[0].r;
+    type = vtop[-1].type;
+    r_dst = get_reg(RC_INT);
+
+    o(0xaa0003e0 | r_dst | r_src << 16); // mov x(r_dst), x(r_src)
+    o(0xdac10800 | r_dst | r_data << 5); // pacda x(r_dst), x(r_data)
+
+    vpop();
+    vpop();
+    vpushi(0);
+    vtop->r = r_dst;
+    vtop->type = type;
+}
+
+ST_FUNC void gen_ptrauth_sign_db(void)
+{
+    CType type;
+    uint32_t r_dst, r_src, r_data;
+
+    gv2(RC_INT, RC_INT);
+    r_src = vtop[-1].r;
+    r_data = vtop[0].r;
+    type = vtop[-1].type;
+    r_dst = get_reg(RC_INT);
+
+    o(0xaa0003e0 | r_dst | r_src << 16); // mov x(r_dst), x(r_src)
+    o(0xdac10c00 | r_dst | r_data << 5); // pacdb x(r_dst), x(r_data)
+
+    vpop();
+    vpop();
+    vpushi(0);
+    vtop->r = r_dst;
+    vtop->type = type;
+}
+#endif
 /* end of A64 code generator */
 /*************************************************************/
 #endif
