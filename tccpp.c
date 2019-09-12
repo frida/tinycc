@@ -1879,8 +1879,28 @@ ST_FUNC void preprocess(int is_bof)
                 goto include_done;
             }
 
-            if (tcc_open(s1, buf1) < 0)
-                continue;
+            if (s1->cpp_load_func) {
+                const char *str;
+                int len;
+
+                str = s1->cpp_load_func(s1->cpp_load_opaque, buf1, &len);
+                if ((s1->verbose == 2 && str != NULL) || s1->verbose == 3)
+                    printf("%s %*s%s\n", str == NULL ? "nf" : "->",
+                           (int)(s1->include_stack_ptr - s1->include_stack), "",
+                           buf1);
+                if (str == NULL)
+                    continue;
+
+                tcc_open_bf(s1, buf1, len);
+                memcpy(file->buffer, str, len);
+
+#ifdef _WIN32
+                normalize_slashes(file->filename);
+#endif
+            } else {
+                if (tcc_open(s1, buf1) < 0)
+                    continue;
+            }
 
             file->include_next_index = i;
 #ifdef INC_DEBUG
