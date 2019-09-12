@@ -1439,6 +1439,13 @@ static int pe_check_symbols(struct pe_info *pe)
             } while (0 == imp_sym && ++n < 2);
 
             //printf("pe_find_export (%d) %4x %s\n", n, imp_sym, name);
+            if (0 == imp_sym && s1->linker_resolve_func) {
+                void *addr = s1->linker_resolve_func(s1->linker_resolve_opaque, name);
+                if (addr) {
+                    tcc_add_symbol(s1, name, addr);
+                    imp_sym = find_elf_sym(s1->dynsymtab_section, pe_export_name(s1, sym));
+                }
+            }
             if (0 == imp_sym)
                 continue; /* will throw the 'undefined' error in relocate_syms() */
 

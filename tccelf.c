@@ -1095,6 +1095,13 @@ ST_FUNC void relocate_syms(TCCState *s1, Section *symtab, int do_resolve)
             name = (char *) s1->symtab->link->data + sym->st_name;
             /* Use ld.so to resolve symbol for us (for tcc -run) */
             if (do_resolve) {
+                if (s1->linker_resolve_func) {
+                    void *addr = s1->linker_resolve_func(s1->linker_resolve_opaque, name);
+                    if (addr) {
+                        sym->st_value = (addr_t) addr;
+                        goto found;
+                    }
+                }
 #if defined TCC_IS_NATIVE && !defined TCC_TARGET_PE
                 /* dlsym() needs the undecorated name.  */
                 const char *name_ud = &name[s1->leading_underscore];
