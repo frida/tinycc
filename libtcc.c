@@ -532,6 +532,13 @@ LIBTCCAPI void tcc_set_cpp_load_func(TCCState *s, void *cpp_load_opaque,
     s->cpp_load_func = cpp_load_func;
 }
 
+LIBTCCAPI void tcc_set_linker_resolve_func(TCCState *s, void *resolve_opaque,
+                    void *(*resolve_func)(void *opaque, const char *name))
+{
+    s->linker_resolve_opaque = resolve_opaque;
+    s->linker_resolve_func = resolve_func;
+}
+
 /* error without aborting current compilation */
 PUB_FUNC void tcc_error_noabort(const char *fmt, ...)
 {

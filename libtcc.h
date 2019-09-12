@@ -39,6 +39,10 @@ LIBTCCAPI void tcc_set_error_func(TCCState *s, void *error_opaque,
 LIBTCCAPI void tcc_set_cpp_load_func(TCCState *s, void *cpp_load_opaque,
     const char *(*cpp_load_func)(void *opaque, const char *path, int *len));
 
+/* set linker resolver callback */
+LIBTCCAPI void tcc_set_linker_resolve_func(TCCState *s, void *resolve_opaque,
+    void *(*resolve_func)(void *opaque, const char *name));
+
 /* set options as from command line (multiple supported) */
 LIBTCCAPI void tcc_set_options(TCCState *s, const char *str);
 

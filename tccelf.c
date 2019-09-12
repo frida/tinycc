@@ -826,8 +826,23 @@ ST_FUNC void relocate_syms(TCCState *s1, Section *symtab, int do_resolve)
             name = (char *) s1->symtab->link->data + sym->st_name;
             /* Use ld.so to resolve symbol for us (for tcc -run) */
             if (do_resolve) {
+                void *addr;
+
+                if (s1->linker_resolve_func) {
+                    addr = s1->linker_resolve_func(s1->linker_resolve_opaque,
+                                                   name);
+                    if (addr) {
+                        sym->st_value = (addr_t) addr;
+#ifdef DEBUG_RELOC
+                        printf ("relocate_sym: %s -> 0x%lx\n", name,
+                                sym->st_value);
+#endif
+                        goto found;
+                    }
+                }
+
 #if defined TCC_IS_NATIVE && !defined TCC_TARGET_PE
-                void *addr = dlsym(RTLD_DEFAULT, name);
+                addr = dlsym(RTLD_DEFAULT, name);
                 if (addr) {
                     sym->st_value = (addr_t) addr;
 #ifdef DEBUG_RELOC

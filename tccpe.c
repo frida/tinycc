@@ -1229,8 +1229,22 @@ static int pe_check_symbols(struct pe_info *pe)
             int imp_sym = pe_find_import(pe->s1, sym);
             struct import_symbol *is;
 
-            if (imp_sym <= 0)
-                goto not_found;
+            if (imp_sym <= 0) {
+                TCCState *s1 = pe->s1;
+
+                if (s1->linker_resolve_func) {
+                    void *addr = s1->linker_resolve_func(
+                                                    s1->linker_resolve_opaque,
+                                                    name);
+                    if (addr) {
+                        tcc_add_symbol(s1, name, addr);
+                        imp_sym = pe_find_import(s1, sym);
+                    }
+                }
+
+                if (imp_sym <= 0)
+                    goto not_found;
+            }
 
             if (type == STT_NOTYPE) {
                 /* symbols from assembler have no type, find out which */

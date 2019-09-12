@@ -768,6 +768,10 @@ struct TCCState {
     void *cpp_load_opaque;
     const char *(*cpp_load_func)(void *opaque, const char *path, int *len);
 
+    /* linker symbol handling */
+    void *linker_resolve_opaque;
+    void *(*linker_resolve_func)(void *opaque, const char *name);
+
     /* output file for preprocessing (-E) */
     FILE *ppfp;
     enum {
