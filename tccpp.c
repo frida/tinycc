@@ -1400,6 +1400,20 @@ static int parse_include(TCCState *s1, int do_next, int test)
                    (int)(s1->include_stack_ptr - s1->include_stack), "", buf);
             return 1;
         }
+        if (s1->cpp_load_func) {
+            const char *str;
+            int len;
+
+            str = s1->cpp_load_func(s1->cpp_load_opaque, buf, &len);
+            if (str == NULL)
+                continue;
+            tcc_open_bf(s1, buf, len);
+            memcpy(file->buffer, str, len);
+#ifdef _WIN32
+            normalize_slashes(file->filename);
+#endif
+            break;
+        }
         if (tcc_open(s1, buf) >= 0)
             break;
     }

@@ -30,6 +30,10 @@ LIBTCCAPI void tcc_set_lib_path(TCCState *s, const char *path);
 typedef void TCCErrorFunc(void *opaque, const char *msg);
 LIBTCCAPI void tcc_set_error_func(TCCState *s, void *error_opaque, TCCErrorFunc *error_func);
 
+/* set preprocessor loader callback */
+LIBTCCAPI void tcc_set_cpp_load_func(TCCState *s, void *cpp_load_opaque,
+    const char *(*cpp_load_func)(void *opaque, const char *path, int *len));
+
 /* set options as from command line (multiple supported) */
 LIBTCCAPI int tcc_set_options(TCCState *s, const char *str);
 
