@@ -525,6 +525,13 @@ LIBTCCAPI void tcc_set_error_func(TCCState *s, void *error_opaque,
     s->error_func = error_func;
 }
 
+LIBTCCAPI void tcc_set_cpp_load_func(TCCState *s, void *cpp_load_opaque,
+    const char *(*cpp_load_func)(void *opaque, const char *path, int *len))
+{
+    s->cpp_load_opaque = cpp_load_opaque;
+    s->cpp_load_func = cpp_load_func;
+}
+
 /* error without aborting current compilation */
 PUB_FUNC void tcc_error_noabort(const char *fmt, ...)
 {

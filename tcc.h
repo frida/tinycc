@@ -764,6 +764,10 @@ struct TCCState {
     jmp_buf error_jmp_buf;
     int nb_errors;
 
+    /* filesystem handling */
+    void *cpp_load_opaque;
+    const char *(*cpp_load_func)(void *opaque, const char *path, int *len);
+
     /* output file for preprocessing (-E) */
     FILE *ppfp;
     enum {
