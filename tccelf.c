@@ -898,20 +898,34 @@ ST_FUNC void relocate_syms(TCCState *s1, Section *symtab, int do_resolve)
     ElfW(Sym) *sym;
     int sym_bind, sh_num;
     const char *name;
+    void *addr;
 
     for_each_elem(symtab, 1, sym, ElfW(Sym)) {
         sh_num = sym->st_shndx;
         if (sh_num == SHN_UNDEF) {
             name = (char *) s1->symtab->link->data + sym->st_name;
+
+            if (s1->linker_resolve_func) {
+                addr = s1->linker_resolve_func(s1->linker_resolve_opaque, name);
+                if (addr) {
+                    sym->st_value = (addr_t) addr;
+#ifdef DEBUG_RELOC
+                    printf ("relocate_sym: %s -> 0x%lx\n", name,
+                            sym->st_value);
+#endif
+                    goto found;
+                }
+            }
+
             /* Use ld.so to resolve symbol for us (for tcc -run) */
             if (do_resolve) {
 #if defined TCC_IS_NATIVE && !defined TCC_TARGET_PE
 #ifdef TCC_TARGET_MACHO
                 /* The symbols in the symtables have a prepended '_'
                    but dlsym() needs the undecorated name.  */
-                void *addr = dlsym(RTLD_DEFAULT, name + 1);
+                addr = dlsym(RTLD_DEFAULT, name + 1);
 #else
-                void *addr = dlsym(RTLD_DEFAULT, name);
+                addr = dlsym(RTLD_DEFAULT, name);
 #endif
                 if (addr) {
                     sym->st_value = (addr_t) addr;
