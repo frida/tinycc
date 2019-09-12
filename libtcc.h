@@ -12,6 +12,15 @@ extern "C" {
 struct TCCState;
 
 typedef struct TCCState TCCState;
+typedef struct TCCSymbolDetails TCCSymbolDetails;
+
+typedef int (*TCCEnumerateSymbolsFunc)(void *opaque,
+    const TCCSymbolDetails *details);
+
+struct TCCSymbolDetails {
+    const char *name;
+    void *value;
+};
 
 /* create a new TCC compilation context */
 LIBTCCAPI TCCState *tcc_new(void);
@@ -89,6 +98,10 @@ LIBTCCAPI int tcc_relocate(TCCState *s1, void *ptr);
    - memory address    : copy code to memory passed by the caller
    returns -1 if error. */
 #define TCC_RELOCATE_AUTO (void*)1
+
+/* enumerate symbols, stop early if enumerate_func returns a nonzero value */
+LIBTCCAPI int tcc_enumerate_symbols(TCCState *s, void *enumerate_opaque,
+    TCCEnumerateSymbolsFunc enumerate_func);
 
 /* return symbol value or NULL if not found */
 LIBTCCAPI void *tcc_get_symbol(TCCState *s, const char *name);

@@ -320,6 +320,12 @@ ST_FUNC Section *find_section(TCCState *s1, const char *name)
 
 /* ------------------------------------------------------------------------- */
 
+/* Browse each elem of type <type> in section <sec> starting at elem <startoff>
+   using variable <elem> */
+#define for_each_elem(sec, startoff, elem, type) \
+    for (elem = (type *) sec->data + startoff; \
+         elem < (type *) (sec->data + sec->data_offset); elem++)
+
 ST_FUNC int put_elf_str(Section *s, const char *sym)
 {
     int offset, len;
@@ -469,6 +475,44 @@ ST_FUNC addr_t get_elf_sym_addr(TCCState *s, const char *name, int err)
         return 0;
     }
     return sym->st_value;
+}
+
+/* enumerate symbols, stop early if enumerate_func returns a nonzero value */
+LIBTCCAPI int tcc_enumerate_symbols(TCCState *s, void *enumerate_opaque,
+                                    TCCEnumerateSymbolsFunc enumerate_func)
+{
+    int ret = 0;
+    Section *symtab;
+    const char *strtab;
+    ElfW(Sym) *sym;
+
+    symtab = s->symtab;
+    strtab = symtab->link->data;
+
+    for_each_elem(symtab, 1, sym, ElfW(Sym)) {
+        TCCSymbolDetails d;
+        int sym_type, section_index;
+
+        if (ELFW(ST_BIND)(sym->st_info) != STB_GLOBAL)
+            continue;
+
+        sym_type = ELFW(ST_TYPE)(sym->st_info);
+        if (sym_type != STT_FUNC && sym_type != STT_OBJECT)
+            continue;
+
+        section_index = sym->st_shndx;
+        if (section_index != 1 && section_index != 2)
+            continue;
+
+        d.name = strtab + sym->st_name;
+        d.value = (void*)(uintptr_t)sym->st_value;
+
+        ret = enumerate_func(enumerate_opaque, &d);
+        if (ret != 0)
+            break;
+    }
+
+    return ret;
 }
 
 /* return elf symbol value */
@@ -705,12 +749,6 @@ ST_FUNC struct sym_attr *get_sym_attr(TCCState *s1, int index, int alloc)
     }
     return &s1->sym_attrs[index];
 }
-
-/* Browse each elem of type <type> in section <sec> starting at elem <startoff>
-   using variable <elem> */
-#define for_each_elem(sec, startoff, elem, type) \
-    for (elem = (type *) sec->data + startoff; \
-         elem < (type *) (sec->data + sec->data_offset); elem++)
 
 /* In an ELF file symbol table, the local symbols must appear below
    the global and weak ones. Since TCC cannot sort it while generating
