@@ -843,6 +843,9 @@ LIBTCCAPI TCCState *tcc_new(void)
     tcc_define_symbol(s, "__unix__", NULL);
     tcc_define_symbol(s, "__unix", NULL);
     tcc_define_symbol(s, "unix", NULL);
+# if defined(__APPLE__)
+    tcc_define_symbol(s, "__APPLE__", NULL);
+# endif
 # if defined(__linux__)
     tcc_define_symbol(s, "__linux__", NULL);
     tcc_define_symbol(s, "__linux", NULL);

@@ -51,6 +51,9 @@ typedef char *va_list;
 #define va_end(ap) ((void)0)
 
 #elif defined(__aarch64__)
+#if defined(__APPLE__)
+typedef char *va_list;
+#else
 typedef struct {
     void *__stack;
     void *__gr_top;
@@ -58,6 +61,7 @@ typedef struct {
     int   __gr_offs;
     int   __vr_offs;
 } va_list;
+#endif
 #define va_start(ap, last) __va_start(ap, last)
 #define va_arg(ap, type) __va_arg(ap, type)
 #define va_end(ap) ((void)0)
