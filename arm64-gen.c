@@ -957,9 +957,17 @@ ST_FUNC void gfunc_call(int nb_args)
                            fltr(vtop[0].r), 31, a[i].value);
             }
             else {
+                int size;
+
                 gv(RC_INT);
-                arm64_strx(arm64_type_size(vtop[0].type.t),
-                           intr(vtop[0].r), 31, a[i] - 32);
+
+                size = arm64_type_size(vtop[0].type.t);
+                // caller must zero-extend up to 32 bits
+                if (size < 2 && nb_fixed != -1 && i > nb_fixed)
+                    size = 2;
+
+                arm64_strx(size,
+                           intr(vtop[0].r), 31, a[i].value);
             }
         }
 
