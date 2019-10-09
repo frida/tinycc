@@ -710,7 +710,9 @@ static int rt_get_caller_pc(addr_t *paddr, ucontext_t *uc, int level)
     if (level < 0)
         return -1;
     else if (level == 0) {
-#if defined(__APPLE__)
+#if defined(__APPLE__) && defined(__DARWIN_OPAQUE_ARM_THREAD_STATE64)
+        *paddr = __darwin_arm_thread_state64_get_pc(uc->uc_mcontext->__ss);
+#elif defined(__APPLE__)
         *paddr = uc->uc_mcontext->__ss.__pc;
 #else
         *paddr = uc->uc_mcontext.pc;
@@ -718,7 +720,10 @@ static int rt_get_caller_pc(addr_t *paddr, ucontext_t *uc, int level)
         return 0;
     }
     else {
-#if defined(__APPLE__)
+#if defined(__APPLE__) && defined(__DARWIN_OPAQUE_ARM_THREAD_STATE64)
+        addr_t *fp =
+            (addr_t *)__darwin_arm_thread_state64_get_fp(uc->uc_mcontext->__ss);
+#elif defined(__APPLE__)
         addr_t *fp = (addr_t *)uc->uc_mcontext->__ss.__fp;
 #else
         addr_t *fp = (addr_t *)uc->uc_mcontext.regs[29];
