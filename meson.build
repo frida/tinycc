@@ -3,8 +3,10 @@ tcc_c_args = [
 ]
 
 tcc_c_args += cc.get_supported_arguments([
+  '-Wno-format-truncation',
   '-Wno-pointer-sign',
   '-Wno-string-plus-int',
+  '-Wno-unused-result',
 ])
 
 tcc_sources = [
