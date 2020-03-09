@@ -483,7 +483,19 @@ ST_FUNC void load(int r, SValue *sv)
     }
 
     if (svr == (VT_CONST | VT_SYM)) {
-        arm64_sym(intr(r), sv->sym, svcul);
+        int ir;
+        Sym *sym;
+
+        ir = intr(r);
+        sym = sv->sym;
+
+        arm64_sym(ir, sym, svcul);
+
+#ifdef HAVE_PTRAUTH
+        if ((sym->type.t & VT_BTYPE) == VT_FUNC && svcul == 0)
+            o(0xdac123e0 | ir); // paciza
+#endif
+
         return;
     }
 
@@ -590,8 +602,17 @@ static void arm64_gen_bl_or_b(int b)
 	greloca(cur_text_section, vtop->sym, ind, R_AARCH64_CALL26, 0);
 	o(0x94000000); // bl .
     }
-    else
-        o(0xd61f0000 | (uint32_t)!b << 21 | intr(gv(RC_R30)) << 5); // br/blr
+    else {
+        uint32_t br_flags;
+
+        br_flags = (uint32_t)!b << 21 | intr(gv(RC_R30)) << 5; // br/blr
+
+#ifdef HAVE_PTRAUTH
+        br_flags |= 0x81f; // br/blr => braaz/blraaz
+#endif
+
+        o(0xd61f0000 | br_flags);
+    }
 }
 
 static int arm64_hfa_aux(CType *type, int *fsize, int num)

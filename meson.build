@@ -78,6 +78,20 @@ if host_arch == 'arm64'
   ]
 endif
 
+ptrauth = '''#ifdef __clang__
+# if __has_feature(ptrauth_calls)
+#  define HAVE_PTRAUTH 1
+# endif
+#endif
+
+#ifndef HAVE_PTRAUTH
+# error Pointer authentication not supported
+#endif
+'''
+if cc.compiles(ptrauth, name : 'pointer authentication')
+  tcc_c_args += '-DHAVE_PTRAUTH'
+endif
+
 tinycc = library('tinycc', tcc_sources,
   c_args: frida_component_cflags + tcc_c_args,
   include_directories: include_directories('./pregenerated'),

@@ -20,6 +20,10 @@
 
 #include "tcc.h"
 
+#ifdef HAVE_PTRAUTH
+#include <ptrauth.h>
+#endif
+
 /* Define this to get some debug output during relocation processing.  */
 #undef DEBUG_RELOC
 
@@ -506,6 +510,12 @@ LIBTCCAPI int tcc_enumerate_symbols(TCCState *s, void *enumerate_opaque,
 
         d.name = strtab + sym->st_name;
         d.value = (void*)(uintptr_t)sym->st_value;
+#ifdef HAVE_PTRAUTH
+        if (sym_type == STT_FUNC) {
+            d.value = ptrauth_sign_unauthenticated(d.value, ptrauth_key_asia,
+                                                   0);
+        }
+#endif
 
         ret = enumerate_func(enumerate_opaque, &d);
         if (ret != 0)
@@ -515,17 +525,40 @@ LIBTCCAPI int tcc_enumerate_symbols(TCCState *s, void *enumerate_opaque,
     return ret;
 }
 
+static void *get_symbol(TCCState *s, const char *name, int err)
+{
+    int sym_index;
+    ElfW(Sym) *sym;
+    void *value;
+
+    sym_index = find_elf_sym(s->symtab, name);
+    sym = &((ElfW(Sym) *)s->symtab->data)[sym_index];
+    if (!sym_index || sym->st_shndx == SHN_UNDEF) {
+        if (err)
+            tcc_error("%s not defined", name);
+        return 0;
+    }
+
+    value = (void*)(uintptr_t)sym->st_value;
+#ifdef HAVE_PTRAUTH
+    if (ELFW(ST_TYPE)(sym->st_info) == STT_FUNC)
+        value = ptrauth_sign_unauthenticated(value, ptrauth_key_asia, 0);
+#endif
+
+    return value;
+}
+
 /* return elf symbol value */
 LIBTCCAPI void *tcc_get_symbol(TCCState *s, const char *name)
 {
-    return (void*)(uintptr_t)get_elf_sym_addr(s, name, 0);
+    return get_symbol(s, name, 0);
 }
 
 #if defined TCC_IS_NATIVE || defined TCC_TARGET_PE
 /* return elf symbol value or error */
 ST_FUNC void* tcc_get_symbol_err(TCCState *s, const char *name)
 {
-    return (void*)(uintptr_t)get_elf_sym_addr(s, name, 1);
+    return get_symbol(s, name, 1);
 }
 #endif
 
