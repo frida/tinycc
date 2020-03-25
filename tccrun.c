@@ -55,6 +55,10 @@ static void *win64_add_function_table(TCCState *s1);
 static void win64_del_function_table(void *);
 #endif
 
+#ifdef __APPLE__
+static addr_t cached_page_size = 0;
+#endif
+
 /* ------------------------------------------------------------- */
 /* Do all relocations (needed before using tcc_get_symbol())
    Returns -1 on error. */
@@ -292,13 +296,20 @@ static void set_pages_executable(void *ptr, unsigned long length)
 #else
     void __clear_cache(void *beginning, void *end);
 # ifndef HAVE_SELINUX
-    addr_t start, end;
-#  ifndef PAGESIZE
-#   define PAGESIZE 4096
+    addr_t start, end, pagesize;
+#  ifdef __APPLE__
+    if (0 == cached_page_size)
+        cached_page_size = getpagesize();
+    pagesize = cached_page_size;
+#  else
+#   ifndef PAGESIZE
+#    define PAGESIZE 4096
+#   endif
+    pagesize = PAGESIZE;
 #  endif
-    start = (addr_t)ptr & ~(PAGESIZE - 1);
+    start = (addr_t)ptr & ~(pagesize - 1);
     end = (addr_t)ptr + length;
-    end = (end + PAGESIZE - 1) & ~(PAGESIZE - 1);
+    end = (end + pagesize - 1) & ~(pagesize - 1);
     if (mprotect((void *)start, end - start, PROT_READ | PROT_WRITE | PROT_EXEC))
         tcc_error("mprotect failed: did you mean to configure --with-selinux?");
 # endif
