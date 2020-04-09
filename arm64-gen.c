@@ -1992,7 +1992,7 @@ ST_FUNC void gen_vla_alloc(CType *type, int align) {
     vpop();
 }
 
-# ifdef HAVE_PTRAUTH
+#ifdef HAVE_PTRAUTH
 ST_FUNC void gen_ptrauth_strip_i(void)
 {
     CType type;
@@ -2113,7 +2113,7 @@ ST_FUNC void gen_ptrauth_sign_db(void)
     vtop->r = r_dst;
     vtop->type = type;
 }
-# endif
+#endif
 /* end of A64 code generator */
 /*************************************************************/
 #endif
