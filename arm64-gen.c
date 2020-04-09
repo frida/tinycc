@@ -1975,7 +1975,8 @@ ST_FUNC void gen_vla_sp_save(int addr) {
     arm64_strx(3, r, 29, addr);
 }
 
-ST_FUNC void gen_vla_sp_restore(int addr) {
+ST_FUNC void gen_vla_sp_restore(int addr)
+{
     // Use x30 because this function can be called when there
     // is a live return value in x0 but there is nothing on
     // the value stack to prevent get_reg from returning x0.
@@ -1984,7 +1985,8 @@ ST_FUNC void gen_vla_sp_restore(int addr) {
     o(0x9100001f | r << 5); // mov sp,x(r)
 }
 
-ST_FUNC void gen_vla_alloc(CType *type, int align) {
+ST_FUNC void gen_vla_alloc(CType *type, int align)
+{
     uint32_t r = intr(gv(RC_INT));
     o(0x91003c00 | r | r << 5); // add x(r),x(r),#15
     o(0x927cec00 | r | r << 5); // bic x(r),x(r),#15
@@ -1993,7 +1995,8 @@ ST_FUNC void gen_vla_alloc(CType *type, int align) {
 }
 
 #ifdef HAVE_PTRAUTH
-ST_FUNC void gen_ptrauth_strip_i(void) {
+ST_FUNC void gen_ptrauth_strip_i(void)
+{
     CType type;
     uint32_t r_dst, r_src;
 
