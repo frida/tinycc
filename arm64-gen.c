@@ -1993,8 +1993,7 @@ ST_FUNC void gen_vla_alloc(CType *type, int align) {
 }
 
 #ifdef HAVE_PTRAUTH
-ST_FUNC void gen_ptrauth_strip_i(void)
-{
+ST_FUNC void gen_ptrauth_strip_i(void) {
     CType type;
     uint32_t r_dst, r_src;
 

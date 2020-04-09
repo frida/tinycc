@@ -288,7 +288,6 @@
      DEF(TOK___gttf2, "__gttf2")
      DEF(TOK___getf2, "__getf2")
 #endif
-
 #if defined TCC_TARGET_ARM64 && defined HAVE_PTRAUTH
      DEF(TOK___arm64_ptrauth_strip_i, "__arm64_ptrauth_strip_i")
      DEF(TOK___arm64_ptrauth_strip_d, "__arm64_ptrauth_strip_d")
