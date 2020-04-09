@@ -25,16 +25,16 @@ typedef uintptr_t ptrauth_generic_signature_t;
 
 #ifdef __PTRAUTH_INTRINSICS__
 #define ptrauth_strip(value, key) \
-        ((key <= ptrauth_key_asib) ? __arm64_ptrauth_strip_i (value)\
-                : __arm64_ptrauth_strip_d (value))
+        ((key <= ptrauth_key_asib) ? __arm64_ptrauth_strip_i(value) \
+                : __arm64_ptrauth_strip_d(value))
 #define ptrauth_blend_discriminator(pointer, integer) \
-        ((void *) (size_t) (((size_t) (void *) (pointer) & 0x0000ffffffffffffULL) |\
+        ((void *) (size_t) (((size_t) (void *) (pointer) & 0x0000ffffffffffffULL) | \
                 (((size_t) integer & 0xffffULL) << 48)))
 #define ptrauth_sign_unauthenticated(value, key, data) \
-        ((key == ptrauth_key_asia) ? __arm64_ptrauth_sign_ia (value, data)\
-                : (key == ptrauth_key_asib) ? __arm64_ptrauth_sign_ib (value, data)\
-                : (key == ptrauth_key_asda) ? __arm64_ptrauth_sign_da (value, data)\
-                : (key == ptrauth_key_asdb) ? __arm64_ptrauth_sign_db (value, data)\
+        ((key == ptrauth_key_asia) ? __arm64_ptrauth_sign_ia(value, data) \
+                : (key == ptrauth_key_asib) ? __arm64_ptrauth_sign_ib(value, data) \
+                : (key == ptrauth_key_asda) ? __arm64_ptrauth_sign_da(value, data) \
+                : (key == ptrauth_key_asdb) ? __arm64_ptrauth_sign_db(value, data) \
                 : value)
 #else
 #define ptrauth_strip(value, key) value
