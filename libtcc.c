@@ -821,6 +821,9 @@ LIBTCCAPI TCCState *tcc_new(void)
 #endif
 #elif defined(TCC_TARGET_ARM64)
     tcc_define_symbol(s, "__aarch64__", NULL);
+#if defined(HAVE_PTRAUTH)
+    tcc_define_symbol(s, "__PTRAUTH_INTRINSICS__", NULL);
+#endif
 #elif defined TCC_TARGET_C67
     tcc_define_symbol(s, "__C67__", NULL);
 #elif defined TCC_TARGET_RISCV64
@@ -832,10 +835,6 @@ LIBTCCAPI TCCState *tcc_new(void)
     tcc_define_symbol(s, "__riscv_fdiv", NULL);
     tcc_define_symbol(s, "__riscv_fsqrt", NULL);
     tcc_define_symbol(s, "__riscv_float_abi_double", NULL);
-#endif
-
-#if defined(TCC_TARGET_ARM64) && defined(HAVE_PTRAUTH)
-    tcc_define_symbol(s, "HAVE_PTRAUTH", NULL);
 #endif
 
 #ifdef TCC_TARGET_PE
