@@ -289,6 +289,15 @@
      DEF(TOK___getf2, "__getf2")
 #endif
 
+#if defined TCC_TARGET_ARM64 && defined HAVE_PTRAUTH
+     DEF(TOK___arm64_ptrauth_strip_i, "__arm64_ptrauth_strip_i")
+     DEF(TOK___arm64_ptrauth_strip_d, "__arm64_ptrauth_strip_d")
+     DEF(TOK___arm64_ptrauth_sign_ia, "__arm64_ptrauth_sign_ia")
+     DEF(TOK___arm64_ptrauth_sign_ib, "__arm64_ptrauth_sign_ib")
+     DEF(TOK___arm64_ptrauth_sign_da, "__arm64_ptrauth_sign_da")
+     DEF(TOK___arm64_ptrauth_sign_db, "__arm64_ptrauth_sign_db")
+#endif
+
 /* bound checking symbols */
 #ifdef CONFIG_TCC_BCHECK
      DEF(TOK___bound_ptr_add, "__bound_ptr_add")

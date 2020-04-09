@@ -1608,6 +1608,14 @@ ST_FUNC void gfunc_return(CType *func_type);
 ST_FUNC void gen_va_start(void);
 ST_FUNC void gen_va_arg(CType *t);
 ST_FUNC void gen_clear_cache(void);
+#ifdef HAVE_PTRAUTH
+ST_FUNC void gen_ptrauth_strip_i(void);
+ST_FUNC void gen_ptrauth_strip_d(void);
+ST_FUNC void gen_ptrauth_sign_ia(void);
+ST_FUNC void gen_ptrauth_sign_ib(void);
+ST_FUNC void gen_ptrauth_sign_da(void);
+ST_FUNC void gen_ptrauth_sign_db(void);
+#endif
 #endif
 
 /* ------------ riscv64-gen.c ------------ */
