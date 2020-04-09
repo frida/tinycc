@@ -834,6 +834,10 @@ LIBTCCAPI TCCState *tcc_new(void)
     tcc_define_symbol(s, "__riscv_float_abi_double", NULL);
 #endif
 
+#if defined(TCC_TARGET_ARM64) && defined(HAVE_PTRAUTH)
+    tcc_define_symbol(s, "HAVE_PTRAUTH", NULL);
+#endif
+
 #ifdef TCC_TARGET_PE
     tcc_define_symbol(s, "_WIN32", NULL);
 # ifdef TCC_TARGET_X86_64
