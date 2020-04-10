@@ -37,8 +37,8 @@ typedef uintptr_t ptrauth_generic_signature_t;
                 : (key == ptrauth_key_asdb) ? __arm64_ptrauth_sign_db(value, data) \
                 : value)
 #else
-#define ptrauth_strip(value, key) value
+#define ptrauth_strip(value, key) (value)
 #define ptrauth_blend_discriminator(pointer, integer) ((uintptr_t)0)
-#define ptrauth_sign_unauthenticated(value, key, data) value
+#define ptrauth_sign_unauthenticated(value, key, data) (value)
 #endif
 #endif
