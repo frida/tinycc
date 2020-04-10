@@ -1992,6 +1992,128 @@ ST_FUNC void gen_vla_alloc(CType *type, int align) {
     vpop();
 }
 
+#ifdef HAVE_PTRAUTH
+ST_FUNC void gen_ptrauth_strip_i(void)
+{
+    CType type;
+    uint32_t r_dst, r_src;
+
+    type = vtop->type;
+    r_src = intr(gv(RC_INT));
+    vpop();
+
+    r_dst = get_reg(RC_INT);
+
+    o(0xaa0003e0 | r_dst | r_src << 16); // mov x(r_dst), x(r_src)
+    o(0xdac143e0 | r_dst); // xpaci x(r_dst)
+
+    vpushi(0);
+    vtop->r = r_dst;
+    vtop->type = type;
+}
+
+ST_FUNC void gen_ptrauth_strip_d(void)
+{
+    CType type;
+    uint32_t r_dst, r_src;
+
+    type = vtop->type;
+    r_src = intr(gv(RC_INT));
+    r_dst = get_reg(RC_INT);
+
+    o(0xaa0003e0 | r_dst | r_src << 16); // mov x(r_dst), x(r_src)
+    o(0xdac147e0 | r_dst); // xpacd x(r_dst)
+
+    vpop();
+    vpushi(0);
+    vtop->r = r_dst;
+    vtop->type = type;
+}
+
+ST_FUNC void gen_ptrauth_sign_ia(void)
+{
+    CType type;
+    uint32_t r_dst, r_src, r_data;
+
+    gv2(RC_INT, RC_INT);
+    r_src = vtop[-1].r;
+    r_data = vtop[0].r;
+    type = vtop[-1].type;
+    r_dst = get_reg(RC_INT);
+
+    o(0xaa0003e0 | r_dst | r_src << 16); // mov x(r_dst), x(r_src)
+    o(0xdac10000 | r_dst | r_data << 5); // pacia x(r_dst), x(r_data)
+
+    vpop();
+    vpop();
+    vpushi(0);
+    vtop->r = r_dst;
+    vtop->type = type;
+}
+
+ST_FUNC void gen_ptrauth_sign_ib(void)
+{
+    CType type;
+    uint32_t r_dst, r_src, r_data;
+
+    gv2(RC_INT, RC_INT);
+    r_src = vtop[-1].r;
+    r_data = vtop[0].r;
+    type = vtop[-1].type;
+    r_dst = get_reg(RC_INT);
+
+    o(0xaa0003e0 | r_dst | r_src << 16); // mov x(r_dst), x(r_src)
+    o(0xdac10400 | r_dst | r_data << 5); // pacib x(r_dst), x(r_data)
+
+    vpop();
+    vpop();
+    vpushi(0);
+    vtop->r = r_dst;
+    vtop->type = type;
+}
+
+ST_FUNC void gen_ptrauth_sign_da(void)
+{
+    CType type;
+    uint32_t r_dst, r_src, r_data;
+
+    gv2(RC_INT, RC_INT);
+    r_src = vtop[-1].r;
+    r_data = vtop[0].r;
+    type = vtop[-1].type;
+    r_dst = get_reg(RC_INT);
+
+    o(0xaa0003e0 | r_dst | r_src << 16); // mov x(r_dst), x(r_src)
+    o(0xdac10800 | r_dst | r_data << 5); // pacda x(r_dst), x(r_data)
+
+    vpop();
+    vpop();
+    vpushi(0);
+    vtop->r = r_dst;
+    vtop->type = type;
+}
+
+ST_FUNC void gen_ptrauth_sign_db(void)
+{
+    CType type;
+    uint32_t r_dst, r_src, r_data;
+
+    gv2(RC_INT, RC_INT);
+    r_src = vtop[-1].r;
+    r_data = vtop[0].r;
+    type = vtop[-1].type;
+    r_dst = get_reg(RC_INT);
+
+    o(0xaa0003e0 | r_dst | r_src << 16); // mov x(r_dst), x(r_src)
+    o(0xdac10c00 | r_dst | r_data << 5); // pacdb x(r_dst), x(r_data)
+
+    vpop();
+    vpop();
+    vpushi(0);
+    vtop->r = r_dst;
+    vtop->type = type;
+}
+#endif
 /* end of A64 code generator */
 /*************************************************************/
 #endif
