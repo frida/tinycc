@@ -828,17 +828,14 @@ LIBTCCAPI TCCState *tcc_new(void)
 #if defined(TCC_TARGET_I386)
     tcc_define_symbol(s, "__i386__", NULL);
     tcc_define_symbol(s, "__i386", NULL);
-    tcc_define_symbol(s, "i386", NULL);
 #elif defined(TCC_TARGET_X86_64)
     tcc_define_symbol(s, "__x86_64__", NULL);
 #elif defined(TCC_TARGET_ARM)
     tcc_define_symbol(s, "__ARM_ARCH_4__", NULL);
     tcc_define_symbol(s, "__arm_elf__", NULL);
     tcc_define_symbol(s, "__arm_elf", NULL);
-    tcc_define_symbol(s, "arm_elf", NULL);
     tcc_define_symbol(s, "__arm__", NULL);
     tcc_define_symbol(s, "__arm", NULL);
-    tcc_define_symbol(s, "arm", NULL);
     tcc_define_symbol(s, "__APCS_32__", NULL);
     tcc_define_symbol(s, "__ARMEL__", NULL);
 #if defined(TCC_ARM_EABI)
@@ -875,7 +872,6 @@ LIBTCCAPI TCCState *tcc_new(void)
 #else
     tcc_define_symbol(s, "__unix__", NULL);
     tcc_define_symbol(s, "__unix", NULL);
-    tcc_define_symbol(s, "unix", NULL);
 # if defined(__linux__)
     tcc_define_symbol(s, "__linux__", NULL);
     tcc_define_symbol(s, "__linux", NULL);
