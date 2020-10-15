@@ -492,7 +492,7 @@ for v in $confvars ; do
   fi
 done
 
-version=`head $source_path/VERSION`
+version=`head $source_path/VERSION.txt`
 echo "VERSION = $version" >> config.mak
 echo "#define TCC_VERSION \"$version\"" >> $TMPH
 echo "@set VERSION $version" > config.texi
