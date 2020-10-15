@@ -331,7 +331,7 @@ extern long double strtold (const char *__nptr, char **__endptr);
 /* -------------------------------------------- */
 
 #include "libtcc.h"
-#include "elf.h"
+#include "tccelf.h"
 #include "stab.h"
 #include "dwarf.h"
 

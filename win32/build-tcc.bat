@@ -6,7 +6,7 @@
 setlocal
 if (%1)==(-clean) goto :cleanup
 set CC=gcc -O2 -Wall
-set /p VERSION= < ..\VERSION
+set /p VERSION= < ..\VERSION.txt
 set TCCDIR=
 set BINDIR=
 set DOC=no
