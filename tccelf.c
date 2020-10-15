@@ -523,7 +523,7 @@ ST_FUNC addr_t get_sym_addr(TCCState *s1, const char *name, int err, int forc)
 #endif
         ) {
         buf[0] = '_';
-        pstrcpy(buf + 1, sizeof(buf) - 1, name);
+        tcc_pstrcpy(buf + 1, sizeof(buf) - 1, name);
         name = buf;
     }
     sym_index = find_elf_sym(s1->symtab, name);
@@ -553,7 +553,7 @@ LIBTCCAPI int tcc_add_symbol(TCCState *s1, const char *name, const void *val)
     char buf[256];
     if (s1->leading_underscore) {
         buf[0] = '_';
-        pstrcpy(buf + 1, sizeof(buf) - 1, name);
+        tcc_pstrcpy(buf + 1, sizeof(buf) - 1, name);
         name = buf;
     }
     set_global_sym(s1, name, NULL, (addr_t)(uintptr_t)val); /* NULL: SHN_ABS */

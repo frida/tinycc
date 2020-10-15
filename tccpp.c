@@ -101,7 +101,7 @@ ST_FUNC void skip(int c)
 {
     if (tok != c) {
         char tmp[40];
-        pstrcpy(tmp, sizeof tmp, get_tok_str(c, &tokc));
+        tcc_pstrcpy(tmp, sizeof tmp, get_tok_str(c, &tokc));
         tcc_error("'%s' expected (got '%s')", tmp, get_tok_str(tok, &tokc));
 	}
     next();
@@ -348,7 +348,7 @@ ST_INLN void cstr_ccat(CString *cstr, int ch)
     cstr->size = size;
 }
 
-ST_INLN char *unicode_to_utf8 (char *b, uint32_t Uc)
+ST_INLN char *tcc_unicode_to_utf8 (char *b, uint32_t Uc)
 {
     if (Uc<0x80) *b++=Uc;
     else if (Uc<0x800) *b++=192+Uc/64, *b++=128+Uc%64;
@@ -363,7 +363,7 @@ ST_INLN char *unicode_to_utf8 (char *b, uint32_t Uc)
 ST_INLN void cstr_u8cat(CString *cstr, int ch)
 {
     char buf[4], *e;
-    e = unicode_to_utf8(buf, (uint32_t)ch);
+    e = tcc_unicode_to_utf8(buf, (uint32_t)ch);
     cstr_cat(cstr, buf, e - buf);
 }
 
@@ -1332,7 +1332,7 @@ static int parse_include(TCCState *s1, int do_next, int test)
         cstr_reset(&tokcstr);
         file->buf_ptr = parse_pp_string(file->buf_ptr, c == '<' ? '>' : c, &tokcstr);
         i = tokcstr.size;
-        pstrncpy(name, sizeof name, tokcstr.data, i);
+        tcc_pstrncpy(name, sizeof name, tokcstr.data, i);
         next_nomacro();
     } else {
         /* computed #include : concatenate tokens until result is one of
@@ -1350,7 +1350,7 @@ static int parse_include(TCCState *s1, int do_next, int test)
                 break;
             if (tok == TOK_LINEFEED)
                 tcc_error("'#include' expects \"FILENAME\" or <FILENAME>");
-            pstrcat(name, sizeof name, get_tok_str(tok, &tokc));
+            tcc_pstrcat(name, sizeof name, get_tok_str(tok, &tokc));
 	}
         c = p[0];
         /* remove '<>|""' */
@@ -1373,7 +1373,7 @@ static int parse_include(TCCState *s1, int do_next, int test)
             if (c != '\"')
                 continue;
             p = file->true_filename;
-            pstrncpy(buf, sizeof buf, p, tcc_basename(p) - p);
+            tcc_pstrncpy(buf, sizeof buf, p, tcc_basename(p) - p);
         } else {
             int j = i - 2, k = j - s1->nb_include_paths;
             if (k < 0)
@@ -1384,10 +1384,10 @@ static int parse_include(TCCState *s1, int do_next, int test)
                 return 0;
             else
                 tcc_error("include file '%s' not found", name);
-            pstrcpy(buf, sizeof buf, p);
-            pstrcat(buf, sizeof buf, "/");
+            tcc_pstrcpy(buf, sizeof buf, p);
+            tcc_pstrcat(buf, sizeof buf, "/");
         }
-        pstrcat(buf, sizeof buf, name);
+        tcc_pstrcat(buf, sizeof buf, name);
         e = search_cached_include(s1, buf, 0);
         if (e && (define_find(e->ifndef_macro) || e->once)) {
             /* no need to parse the include because the 'ifndef macro'
@@ -1772,10 +1772,10 @@ ST_FUNC void tccpp_putfile(const char *filename)
     buf[0] = 0;
     if (!IS_ABSPATH(filename)) {
         /* prepend directory from real file */
-        pstrcpy(buf, sizeof buf, file->true_filename);
+        tcc_pstrcpy(buf, sizeof buf, file->true_filename);
         *tcc_basename(buf) = 0;
     }
-    pstrcat(buf, sizeof buf, filename);
+    tcc_pstrcat(buf, sizeof buf, filename);
 #ifdef _WIN32
     normalize_slashes(buf);
 #endif
@@ -1784,7 +1784,7 @@ ST_FUNC void tccpp_putfile(const char *filename)
     //printf("new file '%s'\n", buf);
     if (file->true_filename == file->filename)
         file->true_filename = tcc_strdup(file->filename);
-    pstrcpy(file->filename, sizeof file->filename, buf);
+    tcc_pstrcpy(file->filename, sizeof file->filename, buf);
     tcc_debug_newfile(tcc_state);
 }
 

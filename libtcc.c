@@ -153,7 +153,7 @@ PUB_FUNC void tcc_exit_state(TCCState *s1)
 
 /********************************************************/
 /* copy a string and truncate it. */
-ST_FUNC char *pstrcpy(char *buf, size_t buf_size, const char *s)
+ST_FUNC char *tcc_pstrcpy(char *buf, size_t buf_size, const char *s)
 {
     char *q, *q_end;
     int c;
@@ -173,16 +173,16 @@ ST_FUNC char *pstrcpy(char *buf, size_t buf_size, const char *s)
 }
 
 /* strcat and truncate. */
-ST_FUNC char *pstrcat(char *buf, size_t buf_size, const char *s)
+ST_FUNC char *tcc_pstrcat(char *buf, size_t buf_size, const char *s)
 {
     size_t len;
     len = strlen(buf);
     if (len < buf_size)
-        pstrcpy(buf + len, buf_size - len, s);
+        tcc_pstrcpy(buf + len, buf_size - len, s);
     return buf;
 }
 
-ST_FUNC char *pstrncpy(char *out, size_t buf_size, const char *s, size_t num)
+ST_FUNC char *tcc_pstrncpy(char *out, size_t buf_size, const char *s, size_t num)
 {
     if (num >= buf_size)
         num = buf_size - 1;
@@ -745,7 +745,7 @@ ST_FUNC void tcc_open_bf(TCCState *s1, const char *filename, int initlen)
     bf->buf_ptr = bf->buffer;
     bf->buf_end = bf->buffer + initlen;
     bf->buf_end[0] = CH_EOB; /* put eob symbol */
-    pstrcpy(bf->filename, sizeof(bf->filename), filename);
+    tcc_pstrcpy(bf->filename, sizeof(bf->filename), filename);
 #ifdef _WIN32
     normalize_slashes(bf->filename);
 #endif
@@ -1183,7 +1183,7 @@ static int tcc_glob_so(TCCState *s1, const char *pattern, char *buf, int size)
         if (2 != sscanf(p + (star - pattern), "%d.%d.%d", &v1, &v2, &v3))
             continue;
         if ((v1 = v1 * 1000 + v2) > v)
-            v = v1, pstrcpy(buf, size, p);
+            v = v1, tcc_pstrcpy(buf, size, p);
     }
     globfree(&g);
     return v;

@@ -1214,9 +1214,9 @@ ST_DATA int nb_stk_data;
 ST_DATA int g_debug;
 
 /* public functions currently used by the tcc main function */
-ST_FUNC char *pstrcpy(char *buf, size_t buf_size, const char *s);
-ST_FUNC char *pstrcat(char *buf, size_t buf_size, const char *s);
-ST_FUNC char *pstrncpy(char *out, size_t buf_size, const char *s, size_t num);
+ST_FUNC char *tcc_pstrcpy(char *buf, size_t buf_size, const char *s);
+ST_FUNC char *tcc_pstrcat(char *buf, size_t buf_size, const char *s);
+ST_FUNC char *tcc_pstrncpy(char *out, size_t buf_size, const char *s, size_t num);
 PUB_FUNC char *tcc_basename(const char *name);
 PUB_FUNC char *tcc_fileextension (const char *name);
 

@@ -1086,7 +1086,7 @@ static void pe_build_exports(struct pe_info *pe)
 
 #if 1
     /* automatically write exports to <output-filename>.def */
-    pstrcpy(buf, sizeof buf, pe->filename);
+    tcc_pstrcpy(buf, sizeof buf, pe->filename);
     strcpy(tcc_fileextension(buf), ".def");
     op = fopen(buf, "wb");
     if (NULL == op) {
@@ -1864,9 +1864,9 @@ static int pe_load_def(TCCState *s1, int fd)
         case 0:
             if (0 != stricmp(p, "LIBRARY") || next == '\n')
                 goto quit;
-            pstrcpy(dllname, sizeof dllname, get_token(&line, &next));
+            tcc_pstrcpy(dllname, sizeof dllname, get_token(&line, &next));
             if (!*tcc_fileextension(dllname))
-                pstrcat(dllname, sizeof dllname, ".dll");
+                tcc_pstrcat(dllname, sizeof dllname, ".dll");
             ++state;
             break;
         case 1:

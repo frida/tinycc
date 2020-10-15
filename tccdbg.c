@@ -1272,7 +1272,7 @@ ST_FUNC void tcc_debug_start(TCCState *s1)
         else
         {
             /* file info: full path + filename */
-            pstrcat(buf, sizeof(buf), "/");
+            tcc_pstrcat(buf, sizeof(buf), "/");
             section_sym = put_elf_sym(symtab_section, 0, 0,
                                       ELFW(ST_INFO)(STB_LOCAL, STT_SECTION), 0,
                                       text_section->sh_num, NULL);
@@ -2058,7 +2058,7 @@ static int tcc_get_dwarf_info(TCCState *s1, Sym *s)
 	    dwarf_data1(dwarf_info_section, DWARF_ABBREV_BASE_TYPE);
 	    dwarf_uleb128(dwarf_info_section, default_debug[i - 1].size);
 	    dwarf_data1(dwarf_info_section, default_debug[i - 1].encoding);
-	    pstrcpy(name, sizeof name, default_debug[i - 1].name);
+	    tcc_pstrcpy(name, sizeof name, default_debug[i - 1].name);
 	    *strchr(name, ':') = 0;
 	    dwarf_strp(dwarf_info_section, name);
 	    dwarf_info.base_type_used[i - 1] = debug_type;

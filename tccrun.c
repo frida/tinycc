@@ -752,7 +752,7 @@ static addr_t rt_printline (rt_context *rc, addr_t wanted_pc, bt_info *bi)
             p = strchr(str, ':');
             if (0 == p || (len = p - str + 1, len > sizeof func_name))
                 len = sizeof func_name;
-            pstrcpy(func_name, len, str);
+            tcc_pstrcpy(func_name, len, str);
             func_addr = pc;
             break;
             /* line number info */
@@ -795,10 +795,10 @@ static addr_t rt_printline (rt_context *rc, addr_t wanted_pc, bt_info *bi)
 found:
     i = last_incl_index;
     if (i > 0) {
-        pstrcpy(bi->file, sizeof bi->file, incl_files[--i]);
+        tcc_pstrcpy(bi->file, sizeof bi->file, incl_files[--i]);
         bi->line = last_line_num;
     }
-    pstrcpy(bi->func, sizeof bi->func, func_name);
+    tcc_pstrcpy(bi->func, sizeof bi->func, func_name);
     bi->func_pc = func_addr;
     return func_addr;
 }
@@ -1097,9 +1097,9 @@ next_line:
     filename = function = NULL, func_addr = 0;
 found:
     if (filename)
-        pstrcpy(bi->file, sizeof bi->file, filename), bi->line = line;
+        tcc_pstrcpy(bi->file, sizeof bi->file, filename), bi->line = line;
     if (function)
-        pstrcpy(bi->func, sizeof bi->func, function);
+        tcc_pstrcpy(bi->func, sizeof bi->func, function);
     bi->func_pc = func_addr;
     return (addr_t)func_addr;
 }
@@ -1149,7 +1149,7 @@ int _tcc_backtrace(rt_frame *f, const char *fmt, va_list ap)
                 break;
             /* we try symtab symbols (no line number info) */
             if (!!(a = rt_elfsym(rc2, pc, &bi.func_pc))) {
-                pstrcpy(bi.func, sizeof bi.func, a);
+                tcc_pstrcpy(bi.func, sizeof bi.func, a);
                 break;
             }
         }

@@ -823,9 +823,9 @@ static void asm_parse_directive(TCCState *s1, int global)
             ident[0] = '\0';
             next();
             if (tok == TOK_STR)
-                pstrcat(ident, sizeof(ident), tokc.str.data);
+                tcc_pstrcat(ident, sizeof(ident), tokc.str.data);
             else
-                pstrcat(ident, sizeof(ident), get_tok_str(tok, &tokc));
+                tcc_pstrcat(ident, sizeof(ident), get_tok_str(tok, &tokc));
             tcc_warning_c(warn_unsupported)("ignoring .ident %s", ident);
             next();
         }
@@ -904,9 +904,9 @@ static void asm_parse_directive(TCCState *s1, int global)
             sname[0] = '\0';
             while (tok != ';' && tok != TOK_LINEFEED && tok != ',') {
                 if (tok == TOK_STR)
-                    pstrcat(sname, sizeof(sname), tokc.str.data);
+                    tcc_pstrcat(sname, sizeof(sname), tokc.str.data);
                 else
-                    pstrcat(sname, sizeof(sname), get_tok_str(tok, NULL));
+                    tcc_pstrcat(sname, sizeof(sname), get_tok_str(tok, NULL));
                 next();
             }
             if (tok == ',') {
@@ -1288,7 +1288,7 @@ static void parse_asm_operands(ASMOperand *operands, int *nb_operands_ptr,
                 skip(']');
             }
 	    astr = parse_mult_str("string constant")->data;
-            pstrcpy(op->constraint, sizeof op->constraint, astr);
+            tcc_pstrcpy(op->constraint, sizeof op->constraint, astr);
             skip('(');
             gexpr();
             if (is_output) {

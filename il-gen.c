@@ -163,7 +163,7 @@ static void il_type_to_str(char *buf, int buf_size,
     bt = t & VT_BTYPE;
     buf[0] = '\0';
     if (t & VT_UNSIGNED)
-        pstrcat(buf, buf_size, "unsigned ");
+        tcc_pstrcat(buf, buf_size, "unsigned ");
     switch(bt) {
     case VT_VOID:
         tstr = "void";
@@ -192,7 +192,7 @@ static void il_type_to_str(char *buf, int buf_size,
     case VT_LDOUBLE:
         tstr = "float64";
     add_tstr:
-        pstrcat(buf, buf_size, tstr);
+        tcc_pstrcat(buf, buf_size, tstr);
         break;
     case VT_STRUCT:
         tcc_error("structures not handled yet");
@@ -200,28 +200,28 @@ static void il_type_to_str(char *buf, int buf_size,
     case VT_FUNC:
         s = sym_find((unsigned)t >> VT_STRUCT_SHIFT);
         il_type_to_str(buf, buf_size, s->t, varstr);
-        pstrcat(buf, buf_size, "(");
+        tcc_pstrcat(buf, buf_size, "(");
         sa = s->next;
         while (sa != NULL) {
             il_type_to_str(buf1, sizeof(buf1), sa->t, NULL);
-            pstrcat(buf, buf_size, buf1);
+            tcc_pstrcat(buf, buf_size, buf1);
             sa = sa->next;
             if (sa)
-                pstrcat(buf, buf_size, ", ");
+                tcc_pstrcat(buf, buf_size, ", ");
         }
-        pstrcat(buf, buf_size, ")");
+        tcc_pstrcat(buf, buf_size, ")");
         goto no_var;
     case VT_PTR:
         s = sym_find((unsigned)t >> VT_STRUCT_SHIFT);
-        pstrcpy(buf1, sizeof(buf1), "*");
+        tcc_pstrcpy(buf1, sizeof(buf1), "*");
         if (varstr)
-            pstrcat(buf1, sizeof(buf1), varstr);
+            tcc_pstrcat(buf1, sizeof(buf1), varstr);
         il_type_to_str(buf, buf_size, s->t, buf1);
         goto no_var;
     }
     if (varstr) {
-        pstrcat(buf, buf_size, " ");
-        pstrcat(buf, buf_size, varstr);
+        tcc_pstrcat(buf, buf_size, " ");
+        tcc_pstrcat(buf, buf_size, varstr);
     }
  no_var: ;
 }
