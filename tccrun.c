@@ -402,7 +402,7 @@ static addr_t rt_printline(addr_t wanted_pc, const char *msg)
                 str = stab_str + sym->n_strx;
                 p = strchr(str, ':');
                 if (!p) {
-                    pstrcpy(func_name, sizeof(func_name), str);
+                    tcc_pstrcpy(func_name, sizeof(func_name), str);
                 } else {
                     len = p - str;
                     if (len > sizeof(func_name) - 1)
@@ -465,8 +465,8 @@ no_stabs:
             if (type == STT_FUNC || type == STT_GNU_IFUNC) {
                 if (wanted_pc >= sym->st_value &&
                     wanted_pc < sym->st_value + sym->st_size) {
-                    pstrcpy(last_func_name, sizeof(last_func_name),
-                            (char *) symtab_section->link->data + sym->st_name);
+                    tcc_pstrcpy(last_func_name, sizeof(last_func_name),
+                                (char *) symtab_section->link->data + sym->st_name);
                     func_addr = sym->st_value;
                     goto found;
                 }

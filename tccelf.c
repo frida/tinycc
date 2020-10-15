@@ -3079,7 +3079,7 @@ static int ld_add_file_list(TCCState *s1, const char *cmd, int as_needed)
                 ret = -1;
                 goto lib_parse_error;
             }
-            pstrcpy(libname, sizeof libname, &filename[1]);
+            tcc_pstrcpy(libname, sizeof libname, &filename[1]);
             if (s1->static_link) {
                 snprintf(filename, sizeof filename, "lib%s.a", libname);
             } else {

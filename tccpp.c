@@ -1784,7 +1784,7 @@ ST_FUNC void preprocess(int is_bof)
             next();
             buf[0] = '\0';
 	    while (tok != TOK_LINEFEED) {
-		pstrcat(buf, sizeof(buf), get_tok_str(tok, &tokc));
+		tcc_pstrcat(buf, sizeof(buf), get_tok_str(tok, &tokc));
 		next();
 	    }
 	    len = strlen(buf);
@@ -1820,17 +1820,17 @@ ST_FUNC void preprocess(int is_bof)
                     continue;
                 /* https://savannah.nongnu.org/bugs/index.php?50847 */
                 path = file->true_filename;
-                pstrncpy(buf1, path, tcc_basename(path) - path);
+                tcc_pstrncpy(buf1, path, tcc_basename(path) - path);
 
             } else {
                 /* search in all the include paths */
                 int j = i - 2, k = j - s1->nb_include_paths;
                 path = k < 0 ? s1->include_paths[j] : s1->sysinclude_paths[k];
-                pstrcpy(buf1, sizeof(buf1), path);
-                pstrcat(buf1, sizeof(buf1), "/");
+                tcc_pstrcpy(buf1, sizeof(buf1), path);
+                tcc_pstrcat(buf1, sizeof(buf1), "/");
             }
 
-            pstrcat(buf1, sizeof(buf1), buf);
+            tcc_pstrcat(buf1, sizeof(buf1), buf);
             e = search_cached_include(s1, buf1, 0);
             if (e && (define_find(e->ifndef_macro) || e->once == pp_once)) {
                 /* no need to parse the include because the 'ifndef macro'
@@ -1973,7 +1973,8 @@ include_done:
             if (tok == TOK_STR) {
                 if (file->true_filename == file->filename)
                     file->true_filename = tcc_strdup(file->filename);
-                pstrcpy(file->filename, sizeof(file->filename), (char *)tokc.str.data);
+                tcc_pstrcpy(file->filename, sizeof(file->filename),
+                            (char *)tokc.str.data);
             } else if (parse_flags & PARSE_FLAG_ASM_FILE)
                 break;
             else

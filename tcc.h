@@ -1128,9 +1128,9 @@ ST_DATA int tcc_ext;
 ST_DATA struct TCCState *tcc_state;
 
 /* public functions currently used by the tcc main function */
-ST_FUNC char *pstrcpy(char *buf, int buf_size, const char *s);
-ST_FUNC char *pstrcat(char *buf, int buf_size, const char *s);
-ST_FUNC char *pstrncpy(char *out, const char *in, size_t num);
+ST_FUNC char *tcc_pstrcpy(char *buf, int buf_size, const char *s);
+ST_FUNC char *tcc_pstrcat(char *buf, int buf_size, const char *s);
+ST_FUNC char *tcc_pstrncpy(char *out, const char *in, size_t num);
 PUB_FUNC char *tcc_basename(const char *name);
 PUB_FUNC char *tcc_fileextension (const char *name);
 
