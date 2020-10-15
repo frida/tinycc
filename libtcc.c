@@ -162,7 +162,7 @@ static void wait_sem(void)
 
 /********************************************************/
 /* copy a string and truncate it. */
-ST_FUNC char *pstrcpy(char *buf, size_t buf_size, const char *s)
+ST_FUNC char *tcc_pstrcpy(char *buf, size_t buf_size, const char *s)
 {
     char *q, *q_end;
     int c;
@@ -182,16 +182,16 @@ ST_FUNC char *pstrcpy(char *buf, size_t buf_size, const char *s)
 }
 
 /* strcat and truncate. */
-ST_FUNC char *pstrcat(char *buf, size_t buf_size, const char *s)
+ST_FUNC char *tcc_pstrcat(char *buf, size_t buf_size, const char *s)
 {
     size_t len;
     len = strlen(buf);
     if (len < buf_size)
-        pstrcpy(buf + len, buf_size - len, s);
+        tcc_pstrcpy(buf + len, buf_size - len, s);
     return buf;
 }
 
-ST_FUNC char *pstrncpy(char *out, const char *in, size_t num)
+ST_FUNC char *tcc_pstrncpy(char *out, const char *in, size_t num)
 {
     memcpy(out, in, num);
     out[num] = '\0';
@@ -646,7 +646,7 @@ ST_FUNC void tcc_open_bf(TCCState *s1, const char *filename, int initlen)
     bf->buf_ptr = bf->buffer;
     bf->buf_end = bf->buffer + initlen;
     bf->buf_end[0] = CH_EOB; /* put eob symbol */
-    pstrcpy(bf->filename, sizeof(bf->filename), filename);
+    tcc_pstrcpy(bf->filename, sizeof(bf->filename), filename);
 #ifdef _WIN32
     normalize_slashes(bf->filename);
 #endif
@@ -1306,7 +1306,7 @@ LIBTCCAPI int tcc_add_symbol(TCCState *s1, const char *name, const void *val)
     char buf[256];
     if (s1->leading_underscore) {
         buf[0] = '_';
-        pstrcpy(buf + 1, sizeof(buf) - 1, name);
+        tcc_pstrcpy(buf + 1, sizeof(buf) - 1, name);
         name = buf;
     }
     set_global_sym(s1, name, NULL, (addr_t)(uintptr_t)val); /* NULL: SHN_ABS */
@@ -1451,7 +1451,7 @@ static void copy_linker_arg(char **pp, const char *s, int sep)
     if (p && sep)
         p[l = strlen(p)] = sep, ++l;
     skip_linker_arg(&q);
-    pstrncpy(l + (*pp = tcc_realloc(p, q - s + l + 1)), s, q - s);
+    tcc_pstrncpy(l + (*pp = tcc_realloc(p, q - s + l + 1)), s, q - s);
 }
 
 /* set linker options */

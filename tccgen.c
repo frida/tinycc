@@ -416,7 +416,7 @@ ST_FUNC void tcc_debug_start(TCCState *s1)
 #ifdef _WIN32
         normalize_slashes(buf);
 #endif
-        pstrcat(buf, sizeof(buf), "/");
+        tcc_pstrcat(buf, sizeof(buf), "/");
         put_stabs_r(s1, buf, N_SO, 0, 0,
                     text_section->data_offset, text_section, section_sym);
         put_stabs_r(s1, file->prev ? file->prev->filename : file->filename,
@@ -762,7 +762,7 @@ ST_FUNC void tcc_debug_putfile(TCCState *s1, const char *filename)
 {
     if (0 == strcmp(file->filename, filename))
         return;
-    pstrcpy(file->filename, sizeof(file->filename), filename);
+    tcc_pstrcpy(file->filename, sizeof(file->filename), filename);
     new_file = 1;
 }
 
@@ -952,7 +952,7 @@ ST_FUNC void put_extern_sym2(Sym *sym, int sh_num,
 
         if (tcc_state->leading_underscore && can_add_underscore) {
             buf1[0] = '_';
-            pstrcpy(buf1 + 1, sizeof(buf1) - 1, name);
+            tcc_pstrcpy(buf1 + 1, sizeof(buf1) - 1, name);
             name = buf1;
         }
 
@@ -2854,24 +2854,24 @@ static void type_to_str(char *buf, int buf_size,
     buf[0] = '\0';
 
     if (t & VT_EXTERN)
-        pstrcat(buf, buf_size, "extern ");
+        tcc_pstrcat(buf, buf_size, "extern ");
     if (t & VT_STATIC)
-        pstrcat(buf, buf_size, "static ");
+        tcc_pstrcat(buf, buf_size, "static ");
     if (t & VT_TYPEDEF)
-        pstrcat(buf, buf_size, "typedef ");
+        tcc_pstrcat(buf, buf_size, "typedef ");
     if (t & VT_INLINE)
-        pstrcat(buf, buf_size, "inline ");
+        tcc_pstrcat(buf, buf_size, "inline ");
     if (t & VT_VOLATILE)
-        pstrcat(buf, buf_size, "volatile ");
+        tcc_pstrcat(buf, buf_size, "volatile ");
     if (t & VT_CONSTANT)
-        pstrcat(buf, buf_size, "const ");
+        tcc_pstrcat(buf, buf_size, "const ");
 
     if (((t & VT_DEFSIGN) && bt == VT_BYTE)
         || ((t & VT_UNSIGNED)
             && (bt == VT_SHORT || bt == VT_INT || bt == VT_LLONG)
             && !IS_ENUM(t)
             ))
-        pstrcat(buf, buf_size, (t & VT_UNSIGNED) ? "unsigned " : "signed ");
+        tcc_pstrcat(buf, buf_size, (t & VT_UNSIGNED) ? "unsigned " : "signed ");
 
     buf_size -= strlen(buf);
     buf += strlen(buf);
@@ -2911,41 +2911,41 @@ static void type_to_str(char *buf, int buf_size,
     case VT_LDOUBLE:
         tstr = "long double";
     add_tstr:
-        pstrcat(buf, buf_size, tstr);
+        tcc_pstrcat(buf, buf_size, tstr);
         break;
     case VT_STRUCT:
         tstr = "struct ";
         if (IS_UNION(t))
             tstr = "union ";
     tstruct:
-        pstrcat(buf, buf_size, tstr);
+        tcc_pstrcat(buf, buf_size, tstr);
         v = type->ref->v & ~SYM_STRUCT;
         if (v >= SYM_FIRST_ANOM)
-            pstrcat(buf, buf_size, "<anonymous>");
+            tcc_pstrcat(buf, buf_size, "<anonymous>");
         else
-            pstrcat(buf, buf_size, get_tok_str(v, NULL));
+            tcc_pstrcat(buf, buf_size, get_tok_str(v, NULL));
         break;
     case VT_FUNC:
         s = type->ref;
         buf1[0]=0;
         if (varstr && '*' == *varstr) {
-            pstrcat(buf1, sizeof(buf1), "(");
-            pstrcat(buf1, sizeof(buf1), varstr);
-            pstrcat(buf1, sizeof(buf1), ")");
+            tcc_pstrcat(buf1, sizeof(buf1), "(");
+            tcc_pstrcat(buf1, sizeof(buf1), varstr);
+            tcc_pstrcat(buf1, sizeof(buf1), ")");
         }
-        pstrcat(buf1, buf_size, "(");
+        tcc_pstrcat(buf1, buf_size, "(");
         sa = s->next;
         while (sa != NULL) {
             char buf2[256];
             type_to_str(buf2, sizeof(buf2), &sa->type, NULL);
-            pstrcat(buf1, sizeof(buf1), buf2);
+            tcc_pstrcat(buf1, sizeof(buf1), buf2);
             sa = sa->next;
             if (sa)
-                pstrcat(buf1, sizeof(buf1), ", ");
+                tcc_pstrcat(buf1, sizeof(buf1), ", ");
         }
         if (s->f.func_type == FUNC_ELLIPSIS)
-            pstrcat(buf1, sizeof(buf1), ", ...");
-        pstrcat(buf1, sizeof(buf1), ")");
+            tcc_pstrcat(buf1, sizeof(buf1), ", ...");
+        tcc_pstrcat(buf1, sizeof(buf1), ")");
         type_to_str(buf, buf_size, &s->type, buf1);
         goto no_var;
     case VT_PTR:
@@ -2958,19 +2958,19 @@ static void type_to_str(char *buf, int buf_size,
             type_to_str(buf, buf_size, &s->type, buf1);
             goto no_var;
         }
-        pstrcpy(buf1, sizeof(buf1), "*");
+        tcc_pstrcpy(buf1, sizeof(buf1), "*");
         if (t & VT_CONSTANT)
-            pstrcat(buf1, buf_size, "const ");
+            tcc_pstrcat(buf1, buf_size, "const ");
         if (t & VT_VOLATILE)
-            pstrcat(buf1, buf_size, "volatile ");
+            tcc_pstrcat(buf1, buf_size, "volatile ");
         if (varstr)
-            pstrcat(buf1, sizeof(buf1), varstr);
+            tcc_pstrcat(buf1, sizeof(buf1), varstr);
         type_to_str(buf, buf_size, &s->type, buf1);
         goto no_var;
     }
     if (varstr) {
-        pstrcat(buf, buf_size, " ");
-        pstrcat(buf, buf_size, varstr);
+        tcc_pstrcat(buf, buf_size, " ");
+        tcc_pstrcat(buf, buf_size, varstr);
     }
  no_var: ;
 }

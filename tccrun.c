@@ -436,7 +436,7 @@ next:
             p = strchr(str, ':');
             if (0 == p || (len = p - str + 1, len > sizeof func_name))
                 len = sizeof func_name;
-            pstrcpy(func_name, len, str);
+            tcc_pstrcpy(func_name, len, str);
             func_addr = pc;
             break;
             /* line number info */
@@ -486,7 +486,7 @@ next:
         if (type == STT_FUNC || type == STT_GNU_IFUNC) {
             if (wanted_pc >= esym->st_value &&
                 wanted_pc < esym->st_value + esym->st_size) {
-                pstrcpy(func_name, sizeof(func_name),
+                tcc_pstrcpy(func_name, sizeof(func_name),
                     rc->elf_str + esym->st_name);
                 func_addr = esym->st_value;
                 goto found;

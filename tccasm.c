@@ -776,9 +776,9 @@ static void asm_parse_directive(TCCState *s1, int global)
             next();
 
             if (tok == TOK_STR)
-                pstrcat(filename, sizeof(filename), tokc.str.data);
+                tcc_pstrcat(filename, sizeof(filename), tokc.str.data);
             else
-                pstrcat(filename, sizeof(filename), get_tok_str(tok, NULL));
+                tcc_pstrcat(filename, sizeof(filename), get_tok_str(tok, NULL));
 
             if (s1->warn_unsupported)
                 tcc_warning("ignoring .file %s", filename);
@@ -794,9 +794,9 @@ static void asm_parse_directive(TCCState *s1, int global)
             next();
 
             if (tok == TOK_STR)
-                pstrcat(ident, sizeof(ident), tokc.str.data);
+                tcc_pstrcat(ident, sizeof(ident), tokc.str.data);
             else
-                pstrcat(ident, sizeof(ident), get_tok_str(tok, NULL));
+                tcc_pstrcat(ident, sizeof(ident), get_tok_str(tok, NULL));
 
             if (s1->warn_unsupported)
                 tcc_warning("ignoring .ident %s", ident);
@@ -864,9 +864,9 @@ static void asm_parse_directive(TCCState *s1, int global)
             sname[0] = '\0';
             while (tok != ';' && tok != TOK_LINEFEED && tok != ',') {
                 if (tok == TOK_STR)
-                    pstrcat(sname, sizeof(sname), tokc.str.data);
+                    tcc_pstrcat(sname, sizeof(sname), tokc.str.data);
                 else
-                    pstrcat(sname, sizeof(sname), get_tok_str(tok, NULL));
+                    tcc_pstrcat(sname, sizeof(sname), get_tok_str(tok, NULL));
                 next();
             }
             if (tok == ',') {
