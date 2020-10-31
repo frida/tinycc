@@ -879,12 +879,14 @@ static unsigned long arm64_pcs(int n, int nb_fixed, CType **type, PCSAlloc *a)
             else if (a[i].indirect && !i)
                 printf("X8 pointer\n");
             else if (a[i].type == PCS_IREG)
-                printf("X%lu%s\n", a[i].value, a[i].indirect ? " pointer" : "");
+                printf("X%lu%s\n", (unsigned long)a[i].value,
+                       a[i].indirect ? " pointer" : "");
             else if (a[i].type == PCS_FREG)
-                printf("V%lu\n", a[i].value);
+                printf("V%lu\n", (unsigned long)a[i].value);
             else
                 printf("stack %lu%s\n",
-                       a[i].value, a[i].indirect ? " pointer" : "");
+                       (unsigned long)a[i].value,
+                       a[i].indirect ? " pointer" : "");
         }
     }
 
