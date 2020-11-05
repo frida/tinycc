@@ -292,7 +292,7 @@ static void set_pages_executable(void *ptr, unsigned long length)
 {
 #ifdef _WIN32
     unsigned long old_protect;
-    VirtualProtect(ptr, length, PAGE_EXECUTE_READWRITE, &old_protect);
+    VirtualProtect(ptr, length, PAGE_EXECUTE_READ, &old_protect);
 #else
     void __clear_cache(void *beginning, void *end);
 # ifndef HAVE_SELINUX
@@ -310,7 +310,7 @@ static void set_pages_executable(void *ptr, unsigned long length)
     start = (addr_t)ptr & ~(pagesize - 1);
     end = (addr_t)ptr + length;
     end = (end + pagesize - 1) & ~(pagesize - 1);
-    if (mprotect((void *)start, end - start, PROT_READ | PROT_WRITE | PROT_EXEC))
+    if (mprotect((void *)start, end - start, PROT_READ | PROT_EXEC))
         tcc_error("mprotect failed: did you mean to configure --with-selinux?");
 # endif
 # if defined TCC_TARGET_ARM || defined TCC_TARGET_ARM64
