@@ -56,7 +56,7 @@
 #define RC_C67_B12    0x04000000
 #define RC_C67_B13    0x08000000
 #define RC_IRET    RC_C67_A4	/* function return: integer register */
-#define RC_LRET    RC_C67_A5	/* function return: second integer register */
+#define RC_IRE2    RC_C67_A5	/* function return: second integer register */
 #define RC_FRET    RC_C67_A4	/* function return: float register */
 
 /* pretty names for the registers */
@@ -89,7 +89,7 @@ enum {
 
 /* return registers for function */
 #define REG_IRET TREG_C67_A4	/* single word int return register */
-#define REG_LRET TREG_C67_A5	/* second word return register (for long long) */
+#define REG_IRE2 TREG_C67_A5    /* second word return register (for long long) */
 #define REG_FRET TREG_C67_A4	/* float return register */
 
 /* defined if function parameters must be evaluated in reverse order */
@@ -111,6 +111,7 @@ enum {
 /******************************************************/
 #else /* ! TARGET_DEFS_ONLY */
 /******************************************************/
+#define USING_GLOBALS
 #include "tcc.h"
 
 ST_DATA const int reg_classes[NB_REGS] = {
@@ -1939,8 +1940,9 @@ void gfunc_call(int nb_args)
 // parameters are loaded and restored upon return (or if/when needed).
 
 /* generate function prolog of type 't' */
-void gfunc_prolog(CType * func_type)
+void gfunc_prolog(Sym *func_sym)
 {
+    CType *func_type = &func_sym->type;
     int addr, align, size, func_call, i;
     Sym *sym;
     CType *type;
@@ -1950,8 +1952,6 @@ void gfunc_prolog(CType * func_type)
     addr = 8;
     /* if the function returns a structure, then add an
        implicit pointer parameter */
-    func_vt = sym->type;
-    func_var = (sym->f.func_type == FUNC_ELLIPSIS);
     if ((func_vt.t & VT_BTYPE) == VT_STRUCT) {
 	func_vc = addr;
 	addr += 4;
@@ -1962,7 +1962,7 @@ void gfunc_prolog(CType * func_type)
     /* define parameters */
     while ((sym = sym->next) != NULL) {
 	type = &sym->type;
-	sym_push(sym->v & ~SYM_FIELD, type, VT_LOCAL | lvalue_type(type->t), addr);
+	sym_push(sym->v & ~SYM_FIELD, type, VT_LOCAL | VT_LVAL, addr);
 	size = type_size(type, &align);
 	size = (size + 3) & ~3;
 
@@ -2390,7 +2390,7 @@ void gen_opf(int op)
 		gfunc_call(2);
 		vpushi(0);
 		vtop->r = REG_FRET;
-		vtop->r2 = REG_LRET;
+		vtop->r2 = REG_IRE2;
 
 	    } else {
 		// must call intrinsic SP floating point divide

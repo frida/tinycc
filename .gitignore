@@ -12,7 +12,6 @@
 *.log
 *.bz2
 *.zip
-*.user
 .gdb_history
 a.out
 tcc_g
@@ -51,8 +50,10 @@ tests/*.gcc
 tests/*-cc*
 tests/*-tcc*
 tests/libtcc_test
+tests/libtcc_test_mt
 tests/asm-c-connect
 tests/asm-c-connect-sep
 tests/vla_test
 tests/hello
 tests/tests2/fred.txt
+libtcc.dylib

@@ -430,7 +430,7 @@ the_end:
 
 #if !defined TCC_TARGET_I386 && !defined TCC_TARGET_X86_64
 
-ST_FUNC void tcc_tool_cross(TCCState *s, char **argv, int option)
+ST_FUNC void tcc_tool_cross(TCCState *s1, char **argv, int option)
 {
     tcc_error("-m%d not implemented.", option);
 }
@@ -479,7 +479,7 @@ static int execvp_win32(const char *prog, char **argv)
 #define execvp execvp_win32
 #endif /* _WIN32 */
 
-ST_FUNC void tcc_tool_cross(TCCState *s, char **argv, int target)
+ST_FUNC void tcc_tool_cross(TCCState *s1, char **argv, int target)
 {
     char program[4096];
     char *a0 = argv[0];
@@ -515,11 +515,11 @@ int _dowildcard = 1;
 /* -------------------------------------------------------------- */
 /* generate xxx.d file */
 
-ST_FUNC void gen_makedeps(TCCState *s, const char *target, const char *filename)
+ST_FUNC void gen_makedeps(TCCState *s1, const char *target, const char *filename)
 {
     FILE *depout;
     char buf[1024];
-    int i;
+    int i, k;
 
     if (!filename) {
         /* compute filename automatically: dir/file.o -> dir/file.d */
@@ -528,17 +528,21 @@ ST_FUNC void gen_makedeps(TCCState *s, const char *target, const char *filename)
         filename = buf;
     }
 
-    if (s->verbose)
+    if (s1->verbose)
         printf("<- %s\n", filename);
 
     /* XXX return err codes instead of error() ? */
     depout = fopen(filename, "w");
     if (!depout)
         tcc_error("could not open '%s'", filename);
-
-    fprintf(depout, "%s: \\\n", target);
-    for (i=0; i<s->nb_target_deps; ++i)
-        fprintf(depout, " %s \\\n", s->target_deps[i]);
+    fprintf(depout, "%s:", target);
+    for (i = 0; i<s1->nb_target_deps; ++i) {
+        for (k = 0; k < i; ++k)
+            if (0 == strcmp(s1->target_deps[i], s1->target_deps[k]))
+                goto next;
+        fprintf(depout, " \\\n  %s", s1->target_deps[i]);
+    next:;
+    }
     fprintf(depout, "\n");
     fclose(depout);
 }

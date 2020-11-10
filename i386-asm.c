@@ -19,6 +19,7 @@
  * Foundation, Inc., 59 Temple Place, Suite 330, Boston, MA  02111-1307  USA
  */
 
+#define USING_GLOBALS
 #include "tcc.h"
 
 #define MAX_OPERANDS 3
@@ -1201,7 +1202,7 @@ ST_FUNC int asm_parse_regvar (int t)
 {
     const char *s;
     Operand op;
-    if (t < TOK_IDENT)
+    if (t < TOK_IDENT || (t & SYM_FIELD))
         return -1;
     s = table_ident[t - TOK_IDENT]->str;
     if (s[0] != '%')
@@ -1489,6 +1490,8 @@ ST_FUNC void subst_asm_operand(CString *add_str,
 		   list when we still know the symbol.  */
 		get_asm_sym(tok_alloc(name, strlen(name))->tok, sv->sym);
 	    }
+            if (tcc_state->leading_underscore)
+              cstr_ccat(add_str, '_');
             cstr_cat(add_str, name, -1);
             if ((uint32_t)sv->c.i == 0)
                 goto no_offset;
@@ -1514,7 +1517,7 @@ ST_FUNC void subst_asm_operand(CString *add_str,
     } else if (r & VT_LVAL) {
         reg = r & VT_VALMASK;
         if (reg >= VT_CONST)
-            tcc_error("internal compiler error");
+            tcc_internal_error("");
         snprintf(buf, sizeof(buf), "(%%%s)",
 #ifdef TCC_TARGET_X86_64
                  get_tok_str(TOK_ASM_rax + reg, NULL)
@@ -1527,7 +1530,7 @@ ST_FUNC void subst_asm_operand(CString *add_str,
         /* register case */
         reg = r & VT_VALMASK;
         if (reg >= VT_CONST)
-            tcc_error("internal compiler error");
+            tcc_internal_error("");
 
         /* choose register operand size */
         if ((sv->type.t & VT_BTYPE) == VT_BYTE ||

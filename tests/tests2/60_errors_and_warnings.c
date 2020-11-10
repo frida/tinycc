@@ -118,6 +118,13 @@ enum e5;
 void f3(enum e4 e);
 void f3(enum e5 e);
 
+#elif defined test_enum_compat_2
+enum e6 { E1 = -1, E0 };
+void f3(enum e6);
+void f3(int);        // should work as int and e6 are compatible
+void f4(enum e6 e);
+void f4(unsigned e); // should error as unsigned and e6 are incompatible
+
 #elif defined test_ptr_to_str
 void f() { _Generic((int const *[]){0}, int:0); }
 #elif defined test_fnptr_to_str
@@ -151,6 +158,10 @@ int ga = 0.42 { 2 };
 struct S { int a, b; };
 struct T { struct S x; };
 struct T gt = { 42 a: 1, 43 };
+#elif defined test_invalid_4
+enum E {
+    x = 1 / 0
+};
 #elif defined test_conflicting_types
 int i;
 void foo(void) {
@@ -181,6 +192,14 @@ void * _Alignas(16) p1;
 #define ONE 0
  _Static_assert(ONE == 0, "don't show me this");
  _Static_assert(ONE == 1, "ONE is not 1");
+
+#elif defined test_static_assert_2
+ _Static_assert(1, "1"" is 1");
+ _Static_assert(0, "0"" is 0");
+
+#elif defined test_static_assert_c2x
+ _Static_assert(1);
+ _Static_assert(0);
 
 #elif defined test_void_array
  void t[3];
@@ -216,14 +235,15 @@ int x[3];
  || defined test_func_2 \
  || defined test_func_3 \
  || defined test_func_4 \
- || defined test_func_5
+ || defined test_func_5 \
+ || defined test_func_6
 #if defined test_func_1
 int hello(int);
 #elif defined test_func_4
 static int hello(int);
 #endif
 int main () {
-#if defined test_func_5
+#if defined test_func_6
     static
 #endif
     int hello(int);
@@ -272,6 +292,78 @@ int main ()
 }
 int xxx[1] = {1};
 int bar() { P(3, xxx[0]); return 0; }
+
+#elif defined test_var_4
+struct yyy { int y; };
+struct zzz;
+void f1() {
+    extern char *x;
+    extern char **xx;
+    extern struct yyy y;
+    extern struct yyy *yy;
+    extern struct zzz z;
+    extern struct zzz *zz;
+}
+void f2() {
+    extern char *x;
+    extern char **xx;
+    extern struct yyy y;
+    extern struct yyy *yy;
+    extern struct zzz z;
+    extern struct zzz *zz;
+}
+struct yyy y, *yy;
+struct zzz { int z; } z, *zz;
+
+/******************************************************************/
+#elif defined test_long_double_type_for_win32
+
+int main()
+{
+    double *a = 0;
+    long double *b = a;
+    int n = _Generic(*a, double:0, long double:1);
+}
+
+#elif defined test_stray_backslash
+#define x \a
+x
+
+#elif defined test_stray_backslash2
+int printf(const char*, ...);
+int main()
+{
+#define _S(x) #x
+#define S(x) _S(x)
+    printf("%sn\n", S(\\));
+}
+
+/******************************************************************/
+#elif defined test_var_array
+
+static struct var_len { int i; const char str[]; } var_array[] =
+{ { 1, "abcdefghijklmnopqrstuvwxyz" },
+  { 2, "longlonglonglonglong" },
+  { 3, "tst3" } };
+
+#elif defined test_var_array2
+
+struct c1 { int a; int b[]; };
+struct c1 c1 = { 1, { 2, 3, 4 } };
+
+struct c2 { int c; struct c1 c1; };
+struct c2 c2 = { 1, { 2, { 3, 4, 5 }}};
+
+/******************************************************************/
+#elif defined test_default_int_type
+n; // warn
+f(); // don't warn
+
+#elif defined test_invalid_global_stmtexpr
+n[sizeof({3;})]; // crashed in block() due to missing local scope
+
+#elif defined test_invalid_tokckill
+f(){"12"3;} // second const token killed the value of the first
 
 /******************************************************************/
 #endif

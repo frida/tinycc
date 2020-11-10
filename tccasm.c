@@ -18,8 +18,11 @@
  * Foundation, Inc., 59 Temple Place, Suite 330, Boston, MA  02111-1307  USA
  */
 
+#define USING_GLOBALS
 #include "tcc.h"
 #ifdef CONFIG_TCC_ASM
+
+static Section *last_text_section; /* to handle .previous asm directive */
 
 ST_FUNC int asm_get_local_label_name(TCCState *s1, unsigned int n)
 {
@@ -35,9 +38,39 @@ static int tcc_assemble_internal(TCCState *s1, int do_preprocess, int global);
 static Sym* asm_new_label(TCCState *s1, int label, int is_local);
 static Sym* asm_new_label1(TCCState *s1, int label, int is_local, int sh_num, int value);
 
+/* If a C name has an _ prepended then only asm labels that start
+   with _ are representable in C, by removing the first _.  ASM names
+   without _ at the beginning don't correspond to C names, but we use
+   the global C symbol table to track ASM names as well, so we need to
+   transform those into ones that don't conflict with a C name,
+   so prepend a '.' for them, but force the ELF asm name to be set.  */
+static int asm2cname(int v, int *addeddot)
+{
+    const char *name;
+    *addeddot = 0;
+    if (!tcc_state->leading_underscore)
+      return v;
+    name = get_tok_str(v, NULL);
+    if (!name)
+      return v;
+    if (name[0] == '_') {
+        v = tok_alloc(name + 1, strlen(name) - 1)->tok;
+    } else if (!strchr(name, '.')) {
+        int n = strlen(name) + 2;
+        char newname[256];
+        snprintf(newname, sizeof newname, ".%s", name);
+        v = tok_alloc(newname, n - 1)->tok;
+        *addeddot = 1;
+    }
+    return v;
+}
+
 static Sym *asm_label_find(int v)
 {
-    Sym *sym = sym_find(v);
+    Sym *sym;
+    int addeddot;
+    v = asm2cname(v, &addeddot);
+    sym = sym_find(v);
     while (sym && sym->sym_scope && !(sym->type.t & VT_STATIC))
         sym = sym->prev_tok;
     return sym;
@@ -45,10 +78,14 @@ static Sym *asm_label_find(int v)
 
 static Sym *asm_label_push(int v)
 {
+    int addeddot, v2 = asm2cname(v, &addeddot);
     /* We always add VT_EXTERN, for sym definition that's tentative
        (for .set, removed for real defs), for mere references it's correct
        as is.  */
-    return global_identifier_push(v, VT_ASM | VT_EXTERN | VT_STATIC, 0);
+    Sym *sym = global_identifier_push(v2, VT_ASM | VT_EXTERN | VT_STATIC, 0);
+    if (addeddot)
+        sym->asm_label = v;
+    return sym;
 }
 
 /* Return a symbol we can use inside the assembler, having name NAME.
@@ -105,7 +142,7 @@ static void asm_expr_unary(TCCState *s1, ExprValue *pe)
                 if (sym && (!sym->c || elfsym(sym)->st_shndx == SHN_UNDEF))
                     sym = sym->prev_tok;
                 if (!sym)
-                    tcc_error("local label '%d' not found backward", n);
+                    tcc_error("local label '%d' not found backward", (int)n);
             } else {
                 /* forward */
                 if (!sym || (sym->c && elfsym(sym)->st_shndx != SHN_UNDEF)) {
@@ -387,7 +424,7 @@ static Sym* asm_new_label1(TCCState *s1, int label, int is_local,
         sym = asm_label_push(label);
     }
     if (!sym->c)
-      put_extern_sym2(sym, SHN_UNDEF, 0, 0, 0);
+      put_extern_sym2(sym, SHN_UNDEF, 0, 0, 1);
     esym = elfsym(sym);
     esym->st_shndx = sh_num;
     esym->st_value = value;
@@ -739,9 +776,9 @@ static void asm_parse_directive(TCCState *s1, int global)
             next();
 
             if (tok == TOK_STR)
-                tcc_pstrcat(filename, sizeof(filename), tokc.str.data);
+                pstrcat(filename, sizeof(filename), tokc.str.data);
             else
-                tcc_pstrcat(filename, sizeof(filename), get_tok_str(tok, NULL));
+                pstrcat(filename, sizeof(filename), get_tok_str(tok, NULL));
 
             if (s1->warn_unsupported)
                 tcc_warning("ignoring .file %s", filename);
@@ -757,9 +794,9 @@ static void asm_parse_directive(TCCState *s1, int global)
             next();
 
             if (tok == TOK_STR)
-                tcc_pstrcat(ident, sizeof(ident), tokc.str.data);
+                pstrcat(ident, sizeof(ident), tokc.str.data);
             else
-                tcc_pstrcat(ident, sizeof(ident), get_tok_str(tok, NULL));
+                pstrcat(ident, sizeof(ident), get_tok_str(tok, NULL));
 
             if (s1->warn_unsupported)
                 tcc_warning("ignoring .ident %s", ident);
@@ -827,9 +864,9 @@ static void asm_parse_directive(TCCState *s1, int global)
             sname[0] = '\0';
             while (tok != ';' && tok != TOK_LINEFEED && tok != ',') {
                 if (tok == TOK_STR)
-                    tcc_pstrcat(sname, sizeof(sname), tokc.str.data);
+                    pstrcat(sname, sizeof(sname), tokc.str.data);
                 else
-                    tcc_pstrcat(sname, sizeof(sname), get_tok_str(tok, NULL));
+                    pstrcat(sname, sizeof(sname), get_tok_str(tok, NULL));
                 next();
             }
             if (tok == ',') {
@@ -983,6 +1020,7 @@ static void tcc_assemble_inline(TCCState *s1, char *str, int len, int global)
 {
     const int *saved_macro_ptr = macro_ptr;
     int dotid = set_idnum('.', IS_ID);
+    int dolid = set_idnum('$', 0);
 
     tcc_open_bf(s1, ":asm:", len);
     memcpy(file->buffer, str, len);
@@ -990,6 +1028,7 @@ static void tcc_assemble_inline(TCCState *s1, char *str, int len, int global)
     tcc_assemble_internal(s1, 0, global);
     tcc_close();
 
+    set_idnum('$', dolid);
     set_idnum('.', dotid);
     macro_ptr = saved_macro_ptr;
 }

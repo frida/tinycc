@@ -29,48 +29,52 @@ static const char help[] =
     "Usage: tcc [options...] [-o outfile] [-c] infile(s)...\n"
     "       tcc [options...] -run infile [arguments...]\n"
     "General options:\n"
-    "  -c          compile only - generate an object file\n"
-    "  -o outfile  set output filename\n"
-    "  -run        run compiled source\n"
-    "  -fflag      set or reset (with 'no-' prefix) 'flag' (see tcc -hh)\n"
-    "  -std=c99    Conform to the ISO 1999 C standard (default).\n"
-    "  -std=c11    Conform to the ISO 2011 C standard.\n"
-    "  -Wwarning   set or reset (with 'no-' prefix) 'warning' (see tcc -hh)\n"
-    "  -w          disable all warnings\n"
-    "  -v -vv      show version, show search paths or loaded files\n"
-    "  -h -hh      show this, show more help\n"
-    "  -bench      show compilation statistics\n"
-    "  -           use stdin pipe as infile\n"
-    "  @listfile   read arguments from listfile\n"
+    "  -c           compile only - generate an object file\n"
+    "  -o outfile   set output filename\n"
+    "  -run         run compiled source\n"
+    "  -fflag       set or reset (with 'no-' prefix) 'flag' (see tcc -hh)\n"
+    "  -std=c99     Conform to the ISO 1999 C standard (default).\n"
+    "  -std=c11     Conform to the ISO 2011 C standard.\n"
+    "  -Wwarning    set or reset (with 'no-' prefix) 'warning' (see tcc -hh)\n"
+    "  -w           disable all warnings\n"
+    "  --version -v show version\n"
+    "  -vv          show search paths or loaded files\n"
+    "  -h -hh       show this, show more help\n"
+    "  -bench       show compilation statistics\n"
+    "  -            use stdin pipe as infile\n"
+    "  @listfile    read arguments from listfile\n"
     "Preprocessor options:\n"
-    "  -Idir       add include path 'dir'\n"
-    "  -Dsym[=val] define 'sym' with value 'val'\n"
-    "  -Usym       undefine 'sym'\n"
-    "  -E          preprocess only\n"
+    "  -Idir        add include path 'dir'\n"
+    "  -Dsym[=val]  define 'sym' with value 'val'\n"
+    "  -Usym        undefine 'sym'\n"
+    "  -E           preprocess only\n"
+    "  -C           keep comments (not yet implemented)\n"
     "Linker options:\n"
-    "  -Ldir       add library path 'dir'\n"
-    "  -llib       link with dynamic or static library 'lib'\n"
-    "  -r          generate (relocatable) object file\n"
-    "  -shared     generate a shared library/dll\n"
-    "  -rdynamic   export all global symbols to dynamic linker\n"
-    "  -soname     set name for shared library to be used at runtime\n"
+    "  -Ldir        add library path 'dir'\n"
+    "  -llib        link with dynamic or static library 'lib'\n"
+    "  -r           generate (relocatable) object file\n"
+    "  -shared      generate a shared library/dll\n"
+    "  -rdynamic    export all global symbols to dynamic linker\n"
+    "  -soname      set name for shared library to be used at runtime\n"
     "  -Wl,-opt[=val]  set linker option (see tcc -hh)\n"
     "Debugger options:\n"
-    "  -g          generate runtime debug info\n"
+    "  -g           generate runtime debug info\n"
 #ifdef CONFIG_TCC_BCHECK
-    "  -b          compile with built-in memory and bounds checker (implies -g)\n"
+    "  -b           compile with built-in memory and bounds checker (implies -g)\n"
 #endif
 #ifdef CONFIG_TCC_BACKTRACE
-    "  -bt N       show N callers in stack traces\n"
+    "  -bt[N]       link with backtrace (stack dump) support [show max N callers]\n"
 #endif
     "Misc. options:\n"
-    "  -x[c|a|b|n] specify type of the next infile (C,ASM,BIN,NONE)\n"
-    "  -nostdinc   do not use standard system include paths\n"
-    "  -nostdlib   do not link with standard crt and libraries\n"
-    "  -Bdir       set tcc's private include/library dir\n"
-    "  -MD         generate dependency file for make\n"
-    "  -MF file    specify dependency file name\n"
-    "  -m32/64     defer to i386/x86_64 cross compiler\n"
+    "  -x[c|a|b|n]  specify type of the next infile (C,ASM,BIN,NONE)\n"
+    "  -nostdinc    do not use standard system include paths\n"
+    "  -nostdlib    do not link with standard crt and libraries\n"
+    "  -Bdir        set tcc's private include/library dir\n"
+    "  -MD          generate dependency file for make\n"
+    "  -MF file     specify dependency file name\n"
+#if defined(TCC_TARGET_I386) || defined(TCC_TARGET_X86_64)
+    "  -m32/64      defer to i386/x86_64 cross compiler\n"
+#endif
     "Tools:\n"
     "  create library  : tcc -ar [rcsv] lib.a files\n"
 #ifdef TCC_TARGET_PE
@@ -155,6 +159,8 @@ static const char version[] =
         "ARM"
 #elif defined TCC_TARGET_ARM64
         "AArch64"
+#elif defined TCC_TARGET_RISCV64
+        "riscv64"
 #endif
 #ifdef TCC_ARM_HARDFLOAT
         " Hard Float"
@@ -250,8 +256,8 @@ static unsigned getclock_ms(void)
 
 int main(int argc0, char **argv0)
 {
-    TCCState *s;
-    int ret, opt, n = 0, t = 0;
+    TCCState *s, *s1;
+    int ret, opt, n = 0, t = 0, done;
     unsigned start_time = 0;
     const char *first_file;
     int argc; char **argv;
@@ -259,14 +265,20 @@ int main(int argc0, char **argv0)
 
 redo:
     argc = argc0, argv = argv0;
-    s = tcc_new();
+    s = s1 = tcc_new();
     opt = tcc_parse_args(s, &argc, &argv, 1);
 
-    if ((n | t) == 0) {
-        if (opt == OPT_HELP)
-            return 0>fputs(help,stdout) || 0>fclose(stdout);
-        if (opt == OPT_HELP2)
-            return 0>fputs(help2,stdout) || 0>fclose(stdout);
+    if (n == 0) {
+        if (opt == OPT_HELP) {
+            fputs(help, stdout);
+            if (!s->verbose)
+                return 0;
+            ++opt;
+        }
+        if (opt == OPT_HELP2) {
+            fputs(help2, stdout);
+            return 0;
+        }
         if (opt == OPT_M32 || opt == OPT_M64)
             tcc_tool_cross(s, argv, opt); /* never returns */
         if (s->verbose)
@@ -287,8 +299,7 @@ redo:
             return 0;
         }
 
-        n = s->nb_files;
-        if (n == 0)
+        if (s->nb_files == 0)
             tcc_error("no input files\n");
 
         if (s->output_type == TCC_OUTPUT_PREPROCESS) {
@@ -300,13 +311,8 @@ redo:
         } else if (s->output_type == TCC_OUTPUT_OBJ && !s->option_r) {
             if (s->nb_libraries)
                 tcc_error("cannot specify libraries with -c");
-            if (n > 1 && s->outfile)
+            if (s->nb_files > 1 && s->outfile)
                 tcc_error("cannot specify output file with -c many files");
-        } else {
-            if (s->option_pthread) {
-                tcc_set_options(s, "-lpthread");
-		n = s->nb_files;
-	    }
         }
 
         if (s->do_bench)
@@ -320,12 +326,19 @@ redo:
     s->ppfp = ppfp;
 
     if ((s->output_type == TCC_OUTPUT_MEMORY
-      || s->output_type == TCC_OUTPUT_PREPROCESS) && (s->dflag & 16))
-        s->dflag |= t ? 32 : 0, s->run_test = ++t, n = s->nb_files;
+      || s->output_type == TCC_OUTPUT_PREPROCESS)
+        && (s->dflag & 16)) { /* -dt option */
+        if (t)
+            s->dflag |= 32;
+        s->run_test = ++t;
+        if (n)
+            --n;
+    }
 
     /* compile or add each files or library */
-    for (first_file = NULL, ret = 0;;) {
-        struct filespec *f = s->files[s->nb_files - n];
+    first_file = NULL, ret = 0;
+    do {
+        struct filespec *f = s->files[n];
         s->filetype = f->type;
         if (f->type & AFF_TYPE_LIB) {
             if (tcc_add_library_err(s, f->name) < 0)
@@ -338,10 +351,8 @@ redo:
             if (tcc_add_file(s, f->name) < 0)
                 ret = 1;
         }
-        if (--n == 0 || ret
-            || (s->output_type == TCC_OUTPUT_OBJ && !s->option_r))
-            break;
-    }
+        done = ret || ++n >= s->nb_files;
+    } while (!done && (s->output_type != TCC_OUTPUT_OBJ || s->option_r));
 
     if (s->run_test) {
         t = 0;
@@ -362,10 +373,10 @@ redo:
         }
     }
 
-    if (s->do_bench && (n | t | ret) == 0)
+    if (s->do_bench && done && !(t | ret))
         tcc_print_stats(s, getclock_ms() - start_time);
     tcc_delete(s);
-    if (ret == 0 && n)
+    if (!done)
         goto redo; /* compile more files with -c */
     if (t)
         goto redo; /* run more tests with -dt -run */

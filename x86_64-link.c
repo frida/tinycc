@@ -22,6 +22,7 @@
 
 #include "tcc.h"
 
+#if !defined(ELF_OBJ_ONLY) || defined(TCC_TARGET_MACHO)
 /* Returns 1 for a code relocation, 0 for a data relocation. For unknown
    relocations, returns -1. */
 int code_reloc (int reloc_type)
@@ -42,6 +43,10 @@ int code_reloc (int reloc_type)
         case R_X86_64_COPY:
         case R_X86_64_RELATIVE:
         case R_X86_64_GOTOFF64:
+        case R_X86_64_TLSGD:
+        case R_X86_64_TLSLD:
+        case R_X86_64_DTPOFF32:
+        case R_X86_64_TPOFF32:
             return 0;
 
         case R_X86_64_PC32:
@@ -51,8 +56,6 @@ int code_reloc (int reloc_type)
         case R_X86_64_JUMP_SLOT:
             return 1;
     }
-
-    tcc_error ("Unknown relocation type: %d", reloc_type);
     return -1;
 }
 
@@ -88,16 +91,20 @@ int gotplt_entry_type (int reloc_type)
         case R_X86_64_GOTOFF64:
         case R_X86_64_GOTPCREL:
         case R_X86_64_GOTPCRELX:
+        case R_X86_64_TLSGD:
+        case R_X86_64_TLSLD:
+        case R_X86_64_DTPOFF32:
+        case R_X86_64_TPOFF32:
         case R_X86_64_REX_GOTPCRELX:
         case R_X86_64_PLT32:
         case R_X86_64_PLTOFF64:
             return ALWAYS_GOTPLT_ENTRY;
     }
 
-    tcc_error ("Unknown relocation type: %d", reloc_type);
     return -1;
 }
 
+#if !defined(TCC_TARGET_MACHO) || defined TCC_IS_NATIVE
 ST_FUNC unsigned create_plt_entry(TCCState *s1, unsigned got_offset, struct sym_attr *attr)
 {
     Section *plt = s1->plt;
@@ -157,22 +164,13 @@ ST_FUNC void relocate_plt(TCCState *s1)
         add32le(p + 8, x - 6);
         p += 16;
         while (p < p_end) {
-            add32le(p + 2, x + s1->plt->data - p);
+            add32le(p + 2, x + (s1->plt->data - p));
             p += 16;
         }
     }
 }
-
-static ElfW_Rel *qrel; /* ptr to next reloc entry reused */
-
-void relocate_init(Section *sr)
-{
-    qrel = (ElfW_Rel *) sr->data;
-}
-
-void relocate_fini(Section *sr)
-{
-}
+#endif
+#endif
 
 void relocate(TCCState *s1, ElfW_Rel *rel, int type, unsigned char *ptr, addr_t addr, addr_t val)
 {
@@ -203,6 +201,7 @@ void relocate(TCCState *s1, ElfW_Rel *rel, int type, unsigned char *ptr, addr_t 
             if (s1->output_type == TCC_OUTPUT_DLL) {
                 /* XXX: this logic may depend on TCC's codegen
                    now TCC uses R_X86_64_32 even for a 64bit pointer */
+                qrel->r_offset = rel->r_offset;
                 qrel->r_info = ELFW(R_INFO)(0, R_X86_64_RELATIVE);
                 /* Use sign extension! */
                 qrel->r_addend = (int)read32le(ptr) + val;
@@ -289,6 +288,70 @@ void relocate(TCCState *s1, ElfW_Rel *rel, int type, unsigned char *ptr, addr_t 
             break;
         case R_X86_64_GOTOFF64:
             add64le(ptr, val - s1->got->sh_addr);
+            break;
+        case R_X86_64_TLSGD:
+            {
+                static const unsigned char expect[] = {
+                    /* .byte 0x66; lea 0(%rip),%rdi */
+                    0x66, 0x48, 0x8d, 0x3d, 0x00, 0x00, 0x00, 0x00,
+                    /* .word 0x6666; rex64; call __tls_get_addr@PLT */
+                    0x66, 0x66, 0x48, 0xe8, 0x00, 0x00, 0x00, 0x00 };
+                static const unsigned char replace[] = {
+                    /* mov %fs:0,%rax */
+                    0x64, 0x48, 0x8b, 0x04, 0x25, 0x00, 0x00, 0x00, 0x00,
+                    /* lea -4(%rax),%rax */
+                    0x48, 0x8d, 0x80, 0x00, 0x00, 0x00, 0x00 };
+
+                if (memcmp (ptr-4, expect, sizeof(expect)) == 0) {
+                    ElfW(Sym) *sym;
+                    Section *sec;
+                    int32_t x;
+
+                    memcpy(ptr-4, replace, sizeof(replace));
+                    rel[1].r_info = ELFW(R_INFO)(0, R_X86_64_NONE);
+                    sym = &((ElfW(Sym) *)symtab_section->data)[sym_index];
+                    sec = s1->sections[sym->st_shndx];
+                    x = sym->st_value - sec->sh_addr - sec->data_offset;
+                    add32le(ptr + 8, x);
+                }
+                else
+                    tcc_error("unexpected R_X86_64_TLSGD pattern");
+            }
+            break;
+        case R_X86_64_TLSLD:
+            {
+                static const unsigned char expect[] = {
+                    /* lea 0(%rip),%rdi */
+                    0x48, 0x8d, 0x3d, 0x00, 0x00, 0x00, 0x00,
+                    /* call __tls_get_addr@PLT */
+                    0xe8, 0x00, 0x00, 0x00, 0x00 };
+                static const unsigned char replace[] = {
+                    /* data16 data16 data16 mov %fs:0,%rax */
+                    0x66, 0x66, 0x66, 0x64, 0x48, 0x8b, 0x04, 0x25,
+                    0x00, 0x00, 0x00, 0x00 };
+
+                if (memcmp (ptr-3, expect, sizeof(expect)) == 0) {
+                    memcpy(ptr-3, replace, sizeof(replace));
+                    rel[1].r_info = ELFW(R_INFO)(0, R_X86_64_NONE);
+                }
+                else
+                    tcc_error("unexpected R_X86_64_TLSLD pattern");
+            }
+            break;
+        case R_X86_64_DTPOFF32:
+        case R_X86_64_TPOFF32:
+            {
+                ElfW(Sym) *sym;
+                Section *sec;
+                int32_t x;
+
+                sym = &((ElfW(Sym) *)symtab_section->data)[sym_index];
+                sec = s1->sections[sym->st_shndx];
+                x = val - sec->sh_addr - sec->data_offset;
+                add32le(ptr, x);
+            }
+            break;
+        case R_X86_64_NONE:
             break;
         case R_X86_64_RELATIVE:
 #ifdef TCC_TARGET_PE

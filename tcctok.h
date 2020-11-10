@@ -91,6 +91,7 @@
      DEF(TOK___FUNCTION__, "__FUNCTION__")
      DEF(TOK___VA_ARGS__, "__VA_ARGS__")
      DEF(TOK___COUNTER__, "__COUNTER__")
+     DEF(TOK___HAS_INCLUDE, "__has_include")
 
 /* special identifiers */
      DEF(TOK___FUNC__, "__func__")
@@ -127,6 +128,12 @@
      DEF(TOK_REGPARM2, "__regparm__")
      DEF(TOK_CLEANUP1, "cleanup")
      DEF(TOK_CLEANUP2, "__cleanup__")
+     DEF(TOK_CONSTRUCTOR1, "constructor")
+     DEF(TOK_CONSTRUCTOR2, "__constructor__")
+     DEF(TOK_DESTRUCTOR1, "destructor")
+     DEF(TOK_DESTRUCTOR2, "__destructor__")
+     DEF(TOK_ALWAYS_INLINE1, "always_inline")
+     DEF(TOK_ALWAYS_INLINE2, "__always_inline__")
 
      DEF(TOK_MODE, "__mode__")
      DEF(TOK_MODE_QI, "__QI__")
@@ -156,8 +163,8 @@
 #elif defined TCC_TARGET_X86_64
      DEF(TOK_builtin_va_arg_types, "__builtin_va_arg_types")
 #elif defined TCC_TARGET_ARM64
-     DEF(TOK___va_start, "__va_start")
-     DEF(TOK___va_arg, "__va_arg")
+     DEF(TOK_builtin_va_start, "__builtin_va_start")
+     DEF(TOK_builtin_va_arg, "__builtin_va_arg")
 #elif defined TCC_TARGET_RISCV64
      DEF(TOK_builtin_va_start, "__builtin_va_start")
 #endif
@@ -201,9 +208,9 @@
 #if defined TCC_TARGET_ARM
 # ifdef TCC_ARM_EABI
      DEF(TOK_memcpy, "__aeabi_memcpy")
-     DEF(TOK_memcpy4, "__aeabi_memcpy4")
-     DEF(TOK_memcpy8, "__aeabi_memcpy8")
      DEF(TOK_memmove, "__aeabi_memmove")
+     DEF(TOK_memmove4, "__aeabi_memmove4")
+     DEF(TOK_memmove8, "__aeabi_memmove8")
      DEF(TOK_memset, "__aeabi_memset")
      DEF(TOK___aeabi_ldivmod, "__aeabi_ldivmod")
      DEF(TOK___aeabi_uldivmod, "__aeabi_uldivmod")
@@ -288,14 +295,6 @@
      DEF(TOK___gttf2, "__gttf2")
      DEF(TOK___getf2, "__getf2")
 #endif
-#if defined TCC_TARGET_ARM64 && defined HAVE_PTRAUTH
-     DEF(TOK___arm64_ptrauth_strip_i, "__arm64_ptrauth_strip_i")
-     DEF(TOK___arm64_ptrauth_strip_d, "__arm64_ptrauth_strip_d")
-     DEF(TOK___arm64_ptrauth_sign_ia, "__arm64_ptrauth_sign_ia")
-     DEF(TOK___arm64_ptrauth_sign_ib, "__arm64_ptrauth_sign_ib")
-     DEF(TOK___arm64_ptrauth_sign_da, "__arm64_ptrauth_sign_da")
-     DEF(TOK___arm64_ptrauth_sign_db, "__arm64_ptrauth_sign_db")
-#endif
 
 /* bound checking symbols */
 #ifdef CONFIG_TCC_BCHECK
@@ -309,15 +308,19 @@
      DEF(TOK___bound_main_arg, "__bound_main_arg")
      DEF(TOK___bound_local_new, "__bound_local_new")
      DEF(TOK___bound_local_delete, "__bound_local_delete")
+     DEF(TOK___bound_setjmp, "__bound_setjmp")
+     DEF(TOK___bound_new_region, "__bound_new_region")
 # ifdef TCC_TARGET_PE
-     DEF(TOK_malloc, "malloc")
-     DEF(TOK_free, "free")
-     DEF(TOK_realloc, "realloc")
-     DEF(TOK_memalign, "memalign")
-     DEF(TOK_calloc, "calloc")
+#  ifdef TCC_TARGET_X86_64
+     DEF(TOK___bound_alloca_nr, "__bound_alloca_nr")
+#  endif
+# else
+     DEF(TOK_sigsetjmp, "sigsetjmp")
+     DEF(TOK___sigsetjmp, "__sigsetjmp")
+     DEF(TOK_siglongjmp, "siglongjmp")
 # endif
-     DEF(TOK_strlen, "strlen")
-     DEF(TOK_strcpy, "strcpy")
+     DEF(TOK_setjmp, "setjmp")
+     DEF(TOK__setjmp, "_setjmp")
 #endif
 
 /* Tiny Assembler */

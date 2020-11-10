@@ -50,15 +50,12 @@ int test4(void)
     int i, sum = 0;
     int *tab4;
 
-    fprintf(stderr, "%s start\n", __FUNCTION__);
-
     tab4 = malloc(20 * sizeof(int));
     for(i=0;i<20;i++) {
         sum += tab4[i];
     }
     free(tab4);
 
-    fprintf(stderr, "%s end\n", __FUNCTION__);
     return sum;
 }
 
@@ -68,20 +65,16 @@ int test5(void)
     int i, sum = 0;
     int *tab4;
 
-    fprintf(stderr, "%s start\n", __FUNCTION__);
-
     tab4 = malloc(20 * sizeof(int));
     for(i=0;i<21;i++) {
         sum += tab4[i];
     }
     free(tab4);
 
-    fprintf(stderr, "%s end\n", __FUNCTION__);
     return sum;
 }
 
 /* error */
-/* XXX: currently: bug */
 int test6(void)
 {
     int i, sum = 0;
@@ -176,21 +169,34 @@ int test13(void)
     return strlen(tab);
 }
 
+#if defined __i386__ || defined __x86_64__
+#define allocf(x)
+#else
+#define alloca(x) malloc(x)
+#define allocf(x) free(x)
+#endif
+
 int test14(void)
 {
     char *p = alloca(TAB_SIZE);
+    size_t ret;
     memset(p, 'a', TAB_SIZE);
     p[TAB_SIZE-1] = 0;
-    return strlen(p);
+    ret = strlen(p);
+    allocf(p);
+    return ret;
 }
 
 /* error */
 int test15(void)
 {
     char *p = alloca(TAB_SIZE-1);
+    size_t ret;
     memset(p, 'a', TAB_SIZE);
     p[TAB_SIZE-1] = 0;
-    return strlen(p);
+    ret = strlen(p);
+    allocf(p);
+    return ret;
 }
 
 /* ok */
@@ -199,16 +205,13 @@ int test16()
     char *demo = "This is only a test.";
     char *p;
 
-    fprintf(stderr, "%s start\n", __FUNCTION__);
-
     p = alloca(16);
     strcpy(p,"12345678901234");
-    printf("alloca: p is %s\n", p);
+    allocf(p);
 
     /* Test alloca embedded in a larger expression */
-    printf("alloca: %s\n", strcpy(alloca(strlen(demo)+1),demo) );
+    printf("alloca : %s : %s\n", p, strcpy(alloca(strlen(demo)+1),demo) );
 
-    fprintf(stderr, "%s end\n", __FUNCTION__);
     return 0;
 }
 
@@ -218,17 +221,24 @@ int test17()
     char *demo = "This is only a test.";
     char *p;
 
-    fprintf(stderr, "%s start\n", __FUNCTION__);
-
     p = alloca(16);
     strcpy(p,"12345678901234");
-    printf("alloca: p is %s\n", p);
+    allocf(p);
 
     /* Test alloca embedded in a larger expression */
-    printf("alloca: %s\n", strcpy(alloca(strlen(demo)),demo) );
+    printf("alloca : %s : %s\n", p, strcpy(alloca(strlen(demo)),demo) );
 
-    fprintf(stderr, "%s end\n", __FUNCTION__);
     return 0;
+}
+
+int test18(void)
+{
+    int i, sum = 0, n = TAB_SIZE;
+    int tab[n];
+    for(i=0;i<TAB_SIZE+1;i++) {
+        sum += tab[i];
+    }
+    return sum;
 }
 
 int (*table_test[])(void) = {
@@ -249,13 +259,24 @@ int (*table_test[])(void) = {
     test15,
     test16,
     test17,
+    test18
 };
 
 int main(int argc, char **argv)
 {
+    int i;
+    char *cp;
     int index;
     int (*ftest)(void);
     int index_max = sizeof(table_test)/sizeof(table_test[0]);
+
+    /* check bounds checking main arg */
+    for (i = 0; i < argc; i++) {
+        cp = argv[i];
+        while (*cp) {
+            cp++;
+        }
+    }
 
     if (argc < 2) {
         printf(

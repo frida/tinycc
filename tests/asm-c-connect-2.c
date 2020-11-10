@@ -1,9 +1,16 @@
 #include <stdio.h>
 
-#if defined _WIN32 && !defined __TINYC__
+#if (defined _WIN32 || defined __APPLE__) && (!defined __TINYC__ || defined __leading_underscore)
 # define _ "_"
 #else
 # define _
+#endif
+
+#ifdef __clang__
+/* clang needs some help tp not throw functions away even at -O0 */
+#define __USED __attribute__((__used__))
+#else
+#define __USED
 #endif
 
 int x3(void)
@@ -30,7 +37,7 @@ void callx5_again(void)
     asm("call "_"x6");
 }
 
-static void x6()
+static void __USED x6()
 {
     printf(" x6-2");
 }

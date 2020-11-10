@@ -198,12 +198,6 @@ extern "C" {
 #endif
 
 #ifndef __cplusplus
-  __CRT_INLINE long double __cdecl fabsl (long double x)
-  {
-    long double res;
-    __asm__ ("fabs;" : "=t" (res) : "0" (x));
-    return res;
-  }
 #define _hypotl(x,y) ((long double)_hypot((double)(x),(double)(y)))
 #define _matherrl _matherr
   __CRT_INLINE long double _chgsignl(long double _Number) { return _chgsign((double)(_Number)); }
@@ -213,12 +207,42 @@ extern "C" {
 #if !defined (__ia64__)
   __CRT_INLINE float __cdecl fabsf (float x)
   {
+#ifdef _WIN64
+    *((int *) &x) &= 0x7fffffff;
+    return x;
+#else
     float res;
     __asm__ ("fabs;" : "=t" (res) : "0" (x));
     return res;
+#endif	
   }
 
   __CRT_INLINE float __cdecl ldexpf (float x, int expn) { return (float) ldexp (x, expn); }
+#endif
+#if defined (_WIN32) && !defined(_WIN64)
+  __CRT_INLINE float acosf(float x) { return (float) acos(x); }
+  __CRT_INLINE float asinf(float x) { return (float) asin(x); }
+  __CRT_INLINE float atanf(float x) { return (float) atan(x); }
+  __CRT_INLINE float atan2f(float x, float y) { return (float) atan2(x, y); }
+  __CRT_INLINE float ceilf(float x) { return (float) ceil(x); }
+  __CRT_INLINE float cosf(float x) { return (float) cos(x); }
+  __CRT_INLINE float coshf(float x) { return (float) cosh(x); }
+  __CRT_INLINE float expf(float x) { return (float) exp(x); }
+  __CRT_INLINE float floorf(float x) { return (float) floor(x); }
+  __CRT_INLINE float fmodf(float x, float y) { return (float) fmod(x, y); }
+  __CRT_INLINE float logf(float x) { return (float) log(x); }
+  __CRT_INLINE float logbf(float x) { return (float) logb(x); }
+  __CRT_INLINE float log10f(float x) { return (float) log10(x); }
+  __CRT_INLINE float modff(float x, float *y) {
+    double di, df = modf(x, &di);
+    *y = (float) di; return (float) df;
+  }
+  __CRT_INLINE float powf(float x, float y) { return (float) pow(x, y); }
+  __CRT_INLINE float sinf(float x) { return (float) sin(x); }
+  __CRT_INLINE float sinhf(float x) { return (float) sinh(x); }
+  __CRT_INLINE float sqrtf(float x) { return (float) sqrt(x); }
+  __CRT_INLINE float tanf(float x) { return (float) tan(x); }
+  __CRT_INLINE float tanhf(float x) { return (float) tanh(x); }
 #endif
 #else
   // cplusplus
@@ -366,7 +390,7 @@ extern "C" {
   extern double __cdecl logb (double);
   extern float __cdecl logbf (float);
   extern long double __cdecl logbl (long double);
-
+#ifndef _WIN32
   __CRT_INLINE double __cdecl logb (double x)
   {
     double res;
@@ -390,6 +414,7 @@ extern "C" {
       "fstp	%%st" : "=t" (res) : "0" (x));
     return res;
   }
+#endif
 
   extern long double __cdecl modfl (long double, long double*);
 
@@ -471,7 +496,7 @@ extern "C" {
     __asm__ (
       "fldl    %1\n"
       "frndint   \n"
-      "fstl    %0\n" : "=m" (retval) : "m" (x));
+      "fstpl    %0\n" : "=m" (retval) : "m" (x));
     return retval;
   }
 
@@ -481,18 +506,23 @@ extern "C" {
     __asm__ (
       "flds    %1\n"
       "frndint   \n"
-      "fsts    %0\n" : "=m" (retval) : "m" (x));
+      "fstps    %0\n" : "=m" (retval) : "m" (x));
     return retval;
   }
 
   __CRT_INLINE long double __cdecl rintl (long double x)
   {
+#ifdef _WIN32
+    //  on win32 'long double' is double internally
+    return rint(x);
+#else
     long double retval;
     __asm__ (
       "fldt    %1\n"
       "frndint   \n"
-      "fstt    %0\n" : "=m" (retval) : "m" (x));
+      "fstpt    %0\n" : "=m" (retval) : "m" (x));
     return retval;
+#endif
   }
 
   /* 7.12.9.5 */
@@ -566,7 +596,7 @@ extern "C" {
     __asm__ ("fldcw %0;" : : "m" (tmp_cw));
     __asm__ ("fldl  %1;"
              "frndint;"
-             "fstl  %0;" : "=m" (retval)  : "m" (_x)); /* round towards zero */
+             "fstpl  %0;" : "=m" (retval)  : "m" (_x)); /* round towards zero */
     __asm__ ("fldcw %0;" : : "m" (saved_cw) ); /* restore saved control word */
     return retval;
   }

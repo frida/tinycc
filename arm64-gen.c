@@ -40,9 +40,13 @@
 
 #define CHAR_IS_UNSIGNED
 
+/* define if return values need to be extended explicitely
+   at caller side (for interfacing with non-TCC compilers) */
+#define PROMOTE_RET
 /******************************************************/
 #else /* ! TARGET_DEFS_ONLY */
 /******************************************************/
+#define USING_GLOBALS
 #include "tcc.h"
 #include <assert.h>
 
@@ -65,11 +69,7 @@ ST_DATA const int reg_classes[NB_REGS] = {
   RC_INT | RC_R(15),
   RC_INT | RC_R(16),
   RC_INT | RC_R(17),
-#ifdef __APPLE__
-  RC_R(18),
-#else
   RC_INT | RC_R(18),
-#endif
   RC_R30, // not in RC_INT as we make special use of x30
   RC_FLOAT | RC_F(0),
   RC_FLOAT | RC_F(1),
@@ -80,6 +80,12 @@ ST_DATA const int reg_classes[NB_REGS] = {
   RC_FLOAT | RC_F(6),
   RC_FLOAT | RC_F(7)
 };
+
+#if defined(CONFIG_TCC_BCHECK)
+static addr_t func_bound_offset;
+static unsigned long func_bound_ind;
+ST_DATA int func_bound_add_epilog;
+#endif
 
 #define IS_FREG(x) ((x) >= TREG_F(0))
 
@@ -242,17 +248,22 @@ ST_FUNC void gsym_addr(int t_, int a_)
 
 static int arm64_type_size(int t)
 {
+    /*
+     * case values are in increasing order (from 1 to 11).
+     * which 'may' help compiler optimizers. See tcc.h
+     */
     switch (t & VT_BTYPE) {
-    case VT_INT: return 2;
     case VT_BYTE: return 0;
     case VT_SHORT: return 1;
+    case VT_INT: return 2;
+    case VT_LLONG: return 3;
     case VT_PTR: return 3;
     case VT_FUNC: return 3;
+    case VT_STRUCT: return 3;
     case VT_FLOAT: return 2;
     case VT_DOUBLE: return 3;
     case VT_LDOUBLE: return 4;
     case VT_BOOL: return 0;
-    case VT_LLONG: return 3;
     }
     assert(0);
     return 0;
@@ -270,6 +281,23 @@ static void arm64_spoff(int reg, uint64_t off)
         arm64_movimm(30, off); // use x30 for offset
         o(0x8b3e63e0 | sub << 30 | reg); // (add|sub) x(reg),sp,x30
     }
+}
+
+/* invert 0: return value to use for store/load */
+/* invert 1: return value to use for arm64_sym */
+static uint64_t arm64_check_offset(int invert, int sz_, uint64_t off)
+{
+    uint32_t sz = sz_;
+    if (!(off & ~((uint32_t)0xfff << sz)) ||
+        (off < 256 || -off <= 256))
+        return invert ? off : 0ul;
+    else if ((off & ((uint32_t)0xfff << sz)))
+        return invert ? off & ((uint32_t)0xfff << sz)
+		      : off & ~((uint32_t)0xfff << sz);
+    else if (off & 0x1ff)
+        return invert ? off & 0x1ff : off & ~0x1ff;
+    else
+        return invert ? 0ul : off;
 }
 
 static void arm64_ldrx(int sg, int sz_, int dst, int bas, uint64_t off)
@@ -312,6 +340,9 @@ static void arm64_ldrs(int reg_, int size)
     // Use x30 for intermediate value in some cases.
     switch (size) {
     default: assert(0); break;
+    case 0:
+        /* Can happen with zero size structs */
+        break;
     case 1:
         arm64_ldrx(0, 0, reg, reg, 0);
         break;
@@ -418,29 +449,27 @@ static void arm64_strv(int sz_, int dst, int bas, uint64_t off)
 
 static void arm64_sym(int r, Sym *sym, unsigned long addend)
 {
-    // Currently TCC's linker does not generate COPY relocations for
-    // STT_OBJECTs when tcc is invoked with "-run". This typically
-    // results in "R_AARCH64_ADR_PREL_PG_HI21 relocation failed" when
-    // a program refers to stdin. A workaround is to avoid that
-    // relocation and use only relocations with unlimited range.
-    int avoid_adrp = 1;
-
-    if (avoid_adrp || sym->a.weak) {
-        // (GCC uses a R_AARCH64_ABS64 in this case.)
-        greloca(cur_text_section, sym, ind, R_AARCH64_MOVW_UABS_G0_NC, addend);
-        o(0xd2800000 | r); // mov x(rt),#0,lsl #0
-        greloca(cur_text_section, sym, ind, R_AARCH64_MOVW_UABS_G1_NC, addend);
-        o(0xf2a00000 | r); // movk x(rt),#0,lsl #16
-        greloca(cur_text_section, sym, ind, R_AARCH64_MOVW_UABS_G2_NC, addend);
-        o(0xf2c00000 | r); // movk x(rt),#0,lsl #32
-        greloca(cur_text_section, sym, ind, R_AARCH64_MOVW_UABS_G3, addend);
-        o(0xf2e00000 | r); // movk x(rt),#0,lsl #48
-    }
-    else {
-        greloca(cur_text_section, sym, ind, R_AARCH64_ADR_PREL_PG_HI21, addend);
-        o(0x90000000 | r);
-        greloca(cur_text_section, sym, ind, R_AARCH64_ADD_ABS_LO12_NC, addend);
-        o(0x91000000 | r | r << 5);
+    greloca(cur_text_section, sym, ind, R_AARCH64_ADR_GOT_PAGE, 0);
+    o(0x90000000 | r);            // adrp xr, #sym
+    greloca(cur_text_section, sym, ind, R_AARCH64_LD64_GOT_LO12_NC, 0);
+    o(0xf9400000 | r | (r << 5)); // ld xr,[xr, #sym]
+    if (addend) {
+        // add xr, xr, #addend
+	if (addend & 0xffful)
+           o(0x91000000 | r | r << 5 | (addend & 0xfff) << 10);
+        if (addend > 0xffful) {
+            // add xr, xr, #addend, lsl #12
+	    if (addend & 0xfff000ul)
+                o(0x91400000 | r | r << 5 | ((addend >> 12) & 0xfff) << 10);
+            if (addend > 0xfffffful) {
+		/* very unlikely */
+		int t = r ? 0 : 1;
+		o(0xf81f0fe0 | t);            /* str xt, [sp, #-16]! */
+		arm64_movimm(t, addend & ~0xfffffful); // use xt for addent
+		o(0x91000000 | r | (t << 5)); /* add xr, xt, #0 */
+		o(0xf84107e0 | t);            /* ldr xt, [sp], #16 */
+	    }
+        }
     }
 }
 
@@ -449,7 +478,7 @@ static void arm64_load_cmp(int r, SValue *sv);
 ST_FUNC void load(int r, SValue *sv)
 {
     int svtt = sv->type.t;
-    int svr = sv->r & ~VT_LVAL_TYPE;
+    int svr = sv->r & ~VT_BOUNDED;
     int svrv = svr & VT_VALMASK;
     uint64_t svcul = (uint32_t)sv->c.i;
     svcul = svcul >> 31 & 1 ? svcul - ((uint64_t)1 << 32) : svcul;
@@ -463,39 +492,43 @@ ST_FUNC void load(int r, SValue *sv)
         return;
     }
 
-    if ((svr & ~VT_VALMASK) == VT_LVAL && svrv < VT_CONST) {
+    if (svr == (VT_CONST | VT_LVAL)) {
+        arm64_sym(30, sv->sym, // use x30 for address
+	          arm64_check_offset(0, arm64_type_size(svtt), sv->c.i));
         if (IS_FREG(r))
-            arm64_ldrv(arm64_type_size(svtt), fltr(r), intr(svrv), 0);
+            arm64_ldrv(arm64_type_size(svtt), fltr(r), 30,
+		       arm64_check_offset(1, arm64_type_size(svtt), sv->c.i));
         else
-            arm64_ldrx(!(svtt & VT_UNSIGNED), arm64_type_size(svtt),
-                       intr(r), intr(svrv), 0);
+            arm64_ldrx(!(svtt&VT_UNSIGNED), arm64_type_size(svtt), intr(r), 30,
+		       arm64_check_offset(1, arm64_type_size(svtt), sv->c.i));
+        return;
+    }
+
+    if ((svr & ~VT_VALMASK) == VT_LVAL && svrv < VT_CONST) {
+        if ((svtt & VT_BTYPE) != VT_VOID) {
+            if (IS_FREG(r))
+                arm64_ldrv(arm64_type_size(svtt), fltr(r), intr(svrv), 0);
+            else
+                arm64_ldrx(!(svtt & VT_UNSIGNED), arm64_type_size(svtt),
+                           intr(r), intr(svrv), 0);
+        }
         return;
     }
 
     if (svr == (VT_CONST | VT_LVAL | VT_SYM)) {
-        arm64_sym(30, sv->sym, svcul); // use x30 for address
+        arm64_sym(30, sv->sym, // use x30 for address
+		  arm64_check_offset(0, arm64_type_size(svtt), svcul));
         if (IS_FREG(r))
-            arm64_ldrv(arm64_type_size(svtt), fltr(r), 30, 0);
+            arm64_ldrv(arm64_type_size(svtt), fltr(r), 30,
+		       arm64_check_offset(1, arm64_type_size(svtt), svcul));
         else
-            arm64_ldrx(!(svtt & VT_UNSIGNED), arm64_type_size(svtt),
-                       intr(r), 30, 0);
+            arm64_ldrx(!(svtt&VT_UNSIGNED), arm64_type_size(svtt), intr(r), 30,
+		       arm64_check_offset(1, arm64_type_size(svtt), svcul));
         return;
     }
 
     if (svr == (VT_CONST | VT_SYM)) {
-        int ir;
-        Sym *sym;
-
-        ir = intr(r);
-        sym = sv->sym;
-
-        arm64_sym(ir, sym, svcul);
-
-#ifdef HAVE_PTRAUTH
-        if ((sym->type.t & VT_BTYPE) == VT_FUNC && svcul == 0)
-            o(0xdac123e0 | ir); // paciza
-#endif
-
+        arm64_sym(intr(r), sv->sym, svcul);
         return;
     }
 
@@ -561,7 +594,7 @@ ST_FUNC void load(int r, SValue *sv)
 ST_FUNC void store(int r, SValue *sv)
 {
     int svtt = sv->type.t;
-    int svr = sv->r & ~VT_LVAL_TYPE;
+    int svr = sv->r & ~VT_BOUNDED;
     int svrv = svr & VT_VALMASK;
     uint64_t svcul = (uint32_t)sv->c.i;
     svcul = svcul >> 31 & 1 ? svcul - ((uint64_t)1 << 32) : svcul;
@@ -574,6 +607,18 @@ ST_FUNC void store(int r, SValue *sv)
         return;
     }
 
+    if (svr == (VT_CONST | VT_LVAL)) {
+        arm64_sym(30, sv->sym, // use x30 for address
+		  arm64_check_offset(0, arm64_type_size(svtt), sv->c.i));
+        if (IS_FREG(r))
+            arm64_strv(arm64_type_size(svtt), fltr(r), 30,
+		       arm64_check_offset(1, arm64_type_size(svtt), sv->c.i));
+        else
+            arm64_strx(arm64_type_size(svtt), intr(r), 30,
+		       arm64_check_offset(1, arm64_type_size(svtt), sv->c.i));
+        return;
+    }
+
     if ((svr & ~VT_VALMASK) == VT_LVAL && svrv < VT_CONST) {
         if (IS_FREG(r))
             arm64_strv(arm64_type_size(svtt), fltr(r), intr(svrv), 0);
@@ -583,11 +628,14 @@ ST_FUNC void store(int r, SValue *sv)
     }
 
     if (svr == (VT_CONST | VT_LVAL | VT_SYM)) {
-        arm64_sym(30, sv->sym, svcul); // use x30 for address
+        arm64_sym(30, sv->sym, // use x30 for address
+		  arm64_check_offset(0, arm64_type_size(svtt), svcul));
         if (IS_FREG(r))
-            arm64_strv(arm64_type_size(svtt), fltr(r), 30, 0);
+            arm64_strv(arm64_type_size(svtt), fltr(r), 30,
+		       arm64_check_offset(1, arm64_type_size(svtt), svcul));
         else
-            arm64_strx(arm64_type_size(svtt), intr(r), 30, 0);
+            arm64_strx(arm64_type_size(svtt), intr(r), 30,
+		       arm64_check_offset(1, arm64_type_size(svtt), svcul));
         return;
     }
 
@@ -598,22 +646,81 @@ ST_FUNC void store(int r, SValue *sv)
 static void arm64_gen_bl_or_b(int b)
 {
     if ((vtop->r & (VT_VALMASK | VT_LVAL)) == VT_CONST && (vtop->r & VT_SYM)) {
-        assert(!b);
-	greloca(cur_text_section, vtop->sym, ind, R_AARCH64_CALL26, 0);
-	o(0x94000000); // bl .
+	greloca(cur_text_section, vtop->sym, ind,
+                b ? R_AARCH64_JUMP26 :  R_AARCH64_CALL26, 0);
+	o(0x14000000 | (uint32_t)!b << 31); // b/bl .
     }
     else {
-        uint32_t br_flags;
-
-        br_flags = (uint32_t)!b << 21 | intr(gv(RC_R30)) << 5; // br/blr
-
-#ifdef HAVE_PTRAUTH
-        br_flags |= 0x81f; // br/blr => braaz/blraaz
+#ifdef CONFIG_TCC_BCHECK
+        vtop->r &= ~VT_MUSTBOUND;
 #endif
-
-        o(0xd61f0000 | br_flags);
+        o(0xd61f0000 | (uint32_t)!b << 21 | intr(gv(RC_R30)) << 5); // br/blr
     }
 }
+
+#if defined(CONFIG_TCC_BCHECK)
+
+static void gen_bounds_call(int v)
+{
+    Sym *sym = external_global_sym(v, &func_old_type);
+
+    greloca(cur_text_section, sym, ind, R_AARCH64_CALL26, 0);
+    o(0x94000000); // bl
+}
+
+static void gen_bounds_prolog(void)
+{
+    /* leave some room for bound checking code */
+    func_bound_offset = lbounds_section->data_offset;
+    func_bound_ind = ind;
+    func_bound_add_epilog = 0;
+    o(0xd503201f);  /* nop -> mov x0, lbound section pointer */
+    o(0xd503201f);
+    o(0xd503201f);
+    o(0xd503201f);  /* nop -> call __bound_local_new */
+}
+
+static void gen_bounds_epilog(void)
+{
+    addr_t saved_ind;
+    addr_t *bounds_ptr;
+    Sym *sym_data;
+    int offset_modified = func_bound_offset != lbounds_section->data_offset;
+
+    if (!offset_modified && !func_bound_add_epilog)
+        return;
+
+    /* add end of table info */
+    bounds_ptr = section_ptr_add(lbounds_section, sizeof(addr_t));
+    *bounds_ptr = 0;
+
+    sym_data = get_sym_ref(&char_pointer_type, lbounds_section,
+                           func_bound_offset, lbounds_section->data_offset);
+
+    /* generate bound local allocation */
+    if (offset_modified) {
+        saved_ind = ind;
+        ind = func_bound_ind;
+        greloca(cur_text_section, sym_data, ind, R_AARCH64_ADR_GOT_PAGE, 0);
+        o(0x90000000 | 0);            // adrp x0, #sym_data
+        greloca(cur_text_section, sym_data, ind, R_AARCH64_LD64_GOT_LO12_NC, 0);
+        o(0xf9400000 | 0 | (0 << 5)); // ld x0,[x0, #sym_data]
+        gen_bounds_call(TOK___bound_local_new);
+        ind = saved_ind;
+    }
+
+    /* generate bound check local freeing */
+    o(0xf81f0fe0); /* str x0, [sp, #-16]! */
+    o(0x3c9f0fe0); /* str q0, [sp, #-16]! */
+    greloca(cur_text_section, sym_data, ind, R_AARCH64_ADR_GOT_PAGE, 0);
+    o(0x90000000 | 0);            // adrp x0, #sym_data
+    greloca(cur_text_section, sym_data, ind, R_AARCH64_LD64_GOT_LO12_NC, 0);
+    o(0xf9400000 | 0 | (0 << 5)); // ld x0,[x0, #sym_data]
+    gen_bounds_call(TOK___bound_local_delete);
+    o(0x3cc107e0); /* ldr q0, [sp], #16 */
+    o(0xf84107e0); /* ldr x0, [sp], #16 */
+}
+#endif
 
 static int arm64_hfa_aux(CType *type, int *fsize, int num)
 {
@@ -658,7 +765,7 @@ static int arm64_hfa_aux(CType *type, int *fsize, int num)
             return num;
         }
     }
-    else if (type->t & VT_ARRAY) {
+    else if ((type->t & VT_ARRAY) && ((type->t & VT_BTYPE) != VT_PTR)) {
         int num1;
         if (!type->ref->c)
             return num;
@@ -673,9 +780,10 @@ static int arm64_hfa_aux(CType *type, int *fsize, int num)
     return -1;
 }
 
-static int arm64_hfa(CType *type, int *fsize)
+static int arm64_hfa(CType *type, unsigned *fsize)
 {
-    if ((type->t & VT_BTYPE) == VT_STRUCT || (type->t & VT_ARRAY)) {
+    if ((type->t & VT_BTYPE) == VT_STRUCT ||
+        ((type->t & VT_ARRAY) && ((type->t & VT_BTYPE) != VT_PTR))) {
         int sz = 0;
         int n = arm64_hfa_aux(type, &sz, 0);
         if (0 < n && n <= 4) {
@@ -687,55 +795,16 @@ static int arm64_hfa(CType *type, int *fsize)
     return 0;
 }
 
-typedef struct PCSAlloc PCSAlloc;
-
-enum {
-    PCS_VOID,
-    PCS_IREG,
-    PCS_FREG,
-    PCS_STACK
-} PCSType;
-
-struct PCSAlloc {
-    unsigned long
-    type     : 2,
-    value    : 61,
-    indirect : 1;
-};
-
-#define PCS_ALLOC_MAKE_VOID() (PCSAlloc) { PCS_VOID, 0, 0 }
-#define PCS_ALLOC_MAKE_IREG(v) (PCSAlloc) { PCS_IREG, v, 0 }
-#define PCS_ALLOC_MAKE_FREG(v) (PCSAlloc) { PCS_FREG, v, 0 }
-#define PCS_ALLOC_MAKE_STACK(v) (PCSAlloc) { PCS_STACK, v, 0 }
-
-#define PCS_ALLOC_MAKE_IREG_INDIRECT(v) (PCSAlloc) { PCS_IREG, v, 1 }
-#define PCS_ALLOC_MAKE_STACK_INDIRECT(v) (PCSAlloc) { PCS_STACK, v, 1 }
-
-static unsigned long arm64_pcs_aux(int n, int nb_fixed, CType **type,
-                                   PCSAlloc *a)
+static unsigned long arm64_pcs_aux(int n, CType **type, unsigned long *a)
 {
     int nx = 0; // next integer register
     int nv = 0; // next vector register
-    unsigned long ns = 0; // next stack offset
+    unsigned long ns = 32; // next stack offset
     int i;
-    int align_and_enlarge_small = 1;
-
-#ifdef __APPLE__
-    align_and_enlarge_small = 0;
-#endif
 
     for (i = 0; i < n; i++) {
         int hfa = arm64_hfa(type[i], 0);
         int size, align;
-
-#ifdef __APPLE__
-        if (i == nb_fixed) {
-            nx = 8;
-            nv = 8;
-
-            align_and_enlarge_small = 1;
-        }
-#endif
 
         if ((type[i]->t & VT_ARRAY) ||
             (type[i]->t & VT_BTYPE) == VT_FUNC)
@@ -748,11 +817,11 @@ static unsigned long arm64_pcs_aux(int n, int nb_fixed, CType **type,
             ;
         else if (size > 16) {
             // B.3: replace with pointer
-            if (nx < 8) {
-                a[i] = PCS_ALLOC_MAKE_IREG_INDIRECT(nx++);
-            } else {
+            if (nx < 8)
+                a[i] = nx++ << 1 | 1;
+            else {
                 ns = (ns + 7) & ~7;
-                a[i] = PCS_ALLOC_MAKE_STACK_INDIRECT(ns);
+                a[i] = ns | 1;
                 ns += 8;
             }
             continue;
@@ -763,13 +832,13 @@ static unsigned long arm64_pcs_aux(int n, int nb_fixed, CType **type,
 
         // C.1
         if (is_float(type[i]->t) && nv < 8) {
-            a[i] = PCS_ALLOC_MAKE_FREG(nv++);
+            a[i] = 16 + (nv++ << 1);
             continue;
         }
 
         // C.2
         if (hfa && nv + hfa <= 8) {
-            a[i] = PCS_ALLOC_MAKE_FREG(nv);
+            a[i] = 16 + (nv << 1);
             nv += hfa;
             continue;
         }
@@ -782,8 +851,7 @@ static unsigned long arm64_pcs_aux(int n, int nb_fixed, CType **type,
 
         // C.4
         if (hfa || (type[i]->t & VT_BTYPE) == VT_LDOUBLE) {
-            if (align_and_enlarge_small)
-                ns = (ns + 7) & ~7;
+            ns = (ns + 7) & ~7;
             ns = (ns + align - 1) & -align;
         }
 
@@ -793,33 +861,31 @@ static unsigned long arm64_pcs_aux(int n, int nb_fixed, CType **type,
 
         // C.6
         if (hfa || is_float(type[i]->t)) {
-            a[i] = PCS_ALLOC_MAKE_STACK(ns);
+            a[i] = ns;
             ns += size;
             continue;
         }
 
         // C.7
         if ((type[i]->t & VT_BTYPE) != VT_STRUCT && size <= 8 && nx < 8) {
-            a[i] = PCS_ALLOC_MAKE_IREG(nx++);
+            a[i] = nx++ << 1;
             continue;
         }
 
         // C.8
-#ifndef __APPLE__
         if (align == 16)
             nx = (nx + 1) & ~1;
-#endif
 
         // C.9
         if ((type[i]->t & VT_BTYPE) != VT_STRUCT && size == 16 && nx < 7) {
-            a[i] = PCS_ALLOC_MAKE_IREG(nx);
+            a[i] = nx << 1;
             nx += 2;
             continue;
         }
 
         // C.10
         if ((type[i]->t & VT_BTYPE) == VT_STRUCT && size <= (8 - nx) * 8) {
-            a[i] = PCS_ALLOC_MAKE_IREG(nx);
+            a[i] = nx << 1;
             nx += (size + 7) >> 3;
             continue;
         }
@@ -828,44 +894,42 @@ static unsigned long arm64_pcs_aux(int n, int nb_fixed, CType **type,
         nx = 8;
 
         // C.12
-        if (align_and_enlarge_small)
-            ns = (ns + 7) & ~7;
+        ns = (ns + 7) & ~7;
         ns = (ns + align - 1) & -align;
 
         // C.13
         if ((type[i]->t & VT_BTYPE) == VT_STRUCT) {
-            a[i] = PCS_ALLOC_MAKE_STACK(ns);
+            a[i] = ns;
             ns += size;
             continue;
         }
 
         // C.14
-        if (align_and_enlarge_small && size < 8)
+        if (size < 8)
             size = 8;
 
         // C.15
-        a[i] = PCS_ALLOC_MAKE_STACK(ns);
+        a[i] = ns;
         ns += size;
     }
 
-    return ns;
+    return ns - 32;
 }
 
-static unsigned long arm64_pcs(int n, int nb_fixed, CType **type, PCSAlloc *a)
+static unsigned long arm64_pcs(int n, CType **type, unsigned long *a)
 {
     unsigned long stack;
 
     // Return type:
     if ((type[0]->t & VT_BTYPE) == VT_VOID)
-        a[0] = PCS_ALLOC_MAKE_VOID();
+        a[0] = -1;
     else {
-        arm64_pcs_aux(1, -1, type, a);
-        assert((a[0].type == PCS_IREG && a[0].value == 0) ||
-               (a[0].type == PCS_FREG && a[0].value == 0 && !a[0].indirect));
+        arm64_pcs_aux(1, type, a);
+        assert(a[0] == 0 || a[0] == 1 || a[0] == 16);
     }
 
     // Argument types:
-    stack = arm64_pcs_aux(n, nb_fixed, type + 1, a + 1);
+    stack = arm64_pcs_aux(n, type + 1, a + 1);
 
     if (0) {
         int i;
@@ -874,19 +938,17 @@ static unsigned long arm64_pcs(int n, int nb_fixed, CType **type, PCSAlloc *a)
                 printf("arm64_pcs return: ");
             else
                 printf("arm64_pcs arg %d: ", i);
-            if (a[i].type == PCS_VOID)
+            if (a[i] == (unsigned long)-1)
                 printf("void\n");
-            else if (a[i].indirect && !i)
+            else if (a[i] == 1 && !i)
                 printf("X8 pointer\n");
-            else if (a[i].type == PCS_IREG)
-                printf("X%lu%s\n", (unsigned long)a[i].value,
-                       a[i].indirect ? " pointer" : "");
-            else if (a[i].type == PCS_FREG)
-                printf("V%lu\n", (unsigned long)a[i].value);
+            else if (a[i] < 16)
+                printf("X%lu%s\n", a[i] / 2, a[i] & 1 ? " pointer" : "");
+            else if (a[i] < 32)
+                printf("V%lu\n", a[i] / 2 - 8);
             else
                 printf("stack %lu%s\n",
-                       (unsigned long)a[i].value,
-                       a[i].indirect ? " pointer" : "");
+                       (a[i] - 32) & ~1, a[i] & 1 ? " pointer" : "");
         }
     }
 
@@ -895,28 +957,18 @@ static unsigned long arm64_pcs(int n, int nb_fixed, CType **type, PCSAlloc *a)
 
 ST_FUNC void gfunc_call(int nb_args)
 {
-    Sym *return_sym;
-    int nb_fixed;
     CType *return_type;
     CType **t;
-    PCSAlloc *a;
-    unsigned long *a1;
+    unsigned long *a, *a1;
     unsigned long stack;
     int i;
 
-    return_sym = vtop[-nb_args].type.ref;
+#ifdef CONFIG_TCC_BCHECK
+    if (tcc_state->do_bounds_check)
+        gbound_args(nb_args);
+#endif
 
-    if (return_sym->f.func_type == FUNC_ELLIPSIS) {
-        Sym *cur;
-
-        nb_fixed = 0;
-        for (cur = return_sym->next; cur; cur = cur->next)
-            nb_fixed++;
-    } else {
-        nb_fixed = -1;
-    }
-
-    return_type = &return_sym->type;
+    return_type = &vtop[-nb_args].type.ref->type;
     if ((return_type->t & VT_BTYPE) == VT_STRUCT)
         --nb_args;
 
@@ -928,11 +980,11 @@ ST_FUNC void gfunc_call(int nb_args)
     for (i = 0; i < nb_args; i++)
         t[nb_args - i] = &vtop[-i].type;
 
-    stack = arm64_pcs(nb_args, nb_fixed, t, a);
+    stack = arm64_pcs(nb_args, t, a);
 
     // Allocate space for structs replaced by pointer:
     for (i = nb_args; i; i--)
-        if (a[i].indirect) {
+        if (a[i] & 1) {
             SValue *arg = &vtop[i - nb_args];
             int align, size = type_size(&arg->type, &align);
             assert((arg->type.t & VT_BTYPE) == VT_STRUCT);
@@ -943,33 +995,36 @@ ST_FUNC void gfunc_call(int nb_args)
 
     stack = (stack + 15) >> 4 << 4;
 
-    assert(stack < 0x1000);
-    if (stack)
-        o(0xd10003ff | stack << 10); // sub sp,sp,#(n)
+    if (stack >= 0x1000000) // 16Mb
+        tcc_error("stack size too big %lu", stack);
+    if (stack & 0xfff)
+        o(0xd10003ff | (stack & 0xfff) << 10); // sub sp,sp,#(n)
+    if (stack >> 12)
+            o(0xd14003ff | (stack >> 12) << 10);
 
     // First pass: set all values on stack
     for (i = nb_args; i; i--) {
         vpushv(vtop - nb_args + i);
 
-        if (a[i].indirect) {
+        if (a[i] & 1) {
             // struct replaced by pointer
             int r = get_reg(RC_INT);
             arm64_spoff(intr(r), a1[i]);
             vset(&vtop->type, r | VT_LVAL, 0);
             vswap();
             vstore();
-            if (a[i].type == PCS_STACK) {
+            if (a[i] >= 32) {
                 // pointer on stack
                 r = get_reg(RC_INT);
                 arm64_spoff(intr(r), a1[i]);
-                arm64_strx(3, intr(r), 31, a[i].value);
+                arm64_strx(3, intr(r), 31, (a[i] - 32) >> 1 << 1);
             }
         }
-        else if (a[i].type == PCS_STACK) {
+        else if (a[i] >= 32) {
             // value on stack
             if ((vtop->type.t & VT_BTYPE) == VT_STRUCT) {
                 int r = get_reg(RC_INT);
-                arm64_spoff(intr(r), a[i].value);
+                arm64_spoff(intr(r), a[i] - 32);
                 vset(&vtop->type, r | VT_LVAL, 0);
                 vswap();
                 vstore();
@@ -977,20 +1032,12 @@ ST_FUNC void gfunc_call(int nb_args)
             else if (is_float(vtop->type.t)) {
                 gv(RC_FLOAT);
                 arm64_strv(arm64_type_size(vtop[0].type.t),
-                           fltr(vtop[0].r), 31, a[i].value);
+                           fltr(vtop[0].r), 31, a[i] - 32);
             }
             else {
-                int size;
-
                 gv(RC_INT);
-
-                size = arm64_type_size(vtop[0].type.t);
-                // caller must zero-extend up to 32 bits
-                if (size < 2 && nb_fixed != -1 && i > nb_fixed)
-                    size = 2;
-
-                arm64_strx(size,
-                           intr(vtop[0].r), 31, a[i].value);
+                arm64_strx(arm64_type_size(vtop[0].type.t),
+                           intr(vtop[0].r), 31, a[i] - 32);
             }
         }
 
@@ -999,22 +1046,24 @@ ST_FUNC void gfunc_call(int nb_args)
 
     // Second pass: assign values to registers
     for (i = nb_args; i; i--, vtop--) {
-        if (a[i].type == PCS_IREG && !a[i].indirect) {
+        if (a[i] < 16 && !(a[i] & 1)) {
             // value in general-purpose registers
             if ((vtop->type.t & VT_BTYPE) == VT_STRUCT) {
                 int align, size = type_size(&vtop->type, &align);
-                vtop->type.t = VT_PTR;
-                gaddrof();
-                gv(RC_R(a[i].value));
-                arm64_ldrs(a[i].value, size);
+                if (size) {
+                    vtop->type.t = VT_PTR;
+                    gaddrof();
+                    gv(RC_R(a[i] / 2));
+                    arm64_ldrs(a[i] / 2, size);
+                }
             }
             else
-                gv(RC_R(a[i].value));
+                gv(RC_R(a[i] / 2));
         }
-        else if (a[i].type == PCS_IREG)
+        else if (a[i] < 16)
             // struct replaced by pointer in register
-            arm64_spoff(a[i].value, a1[i]);
-        else if (a[i].type == PCS_FREG) {
+            arm64_spoff(a[i] / 2, a1[i]);
+        else if (a[i] < 32) {
             // value in floating-point registers
             if ((vtop->type.t & VT_BTYPE) == VT_STRUCT) {
                 uint32_t j, sz, n = arm64_hfa(&vtop->type, &sz);
@@ -1024,16 +1073,16 @@ ST_FUNC void gfunc_call(int nb_args)
                 for (j = 0; j < n; j++)
                     o(0x3d4003c0 |
                       (sz & 16) << 19 | -(sz & 8) << 27 | (sz & 4) << 29 |
-                      (a[i].value + j) |
+                      (a[i] / 2 - 8 + j) |
                       j << 10); // ldr ([sdq])(*),[x30,#(j * sz)]
             }
             else
-                gv(RC_F(a[i].value));
+                gv(RC_F(a[i] / 2 - 8));
         }
     }
 
     if ((return_type->t & VT_BTYPE) == VT_STRUCT) {
-        if (a[0].indirect) {
+        if (a[0] == 1) {
             // indirect return: set x8 and discard the stack value
             gv(RC_R(8));
             --vtop;
@@ -1046,21 +1095,19 @@ ST_FUNC void gfunc_call(int nb_args)
     save_regs(0);
     arm64_gen_bl_or_b(0);
     --vtop;
-    if (stack)
-        o(0x910003ff | stack << 10); // add sp,sp,#(n)
+    if (stack & 0xfff)
+        o(0x910003ff | (stack & 0xfff) << 10); // add sp,sp,#(n)
+    if (stack >> 12)
+        o(0x914003ff | (stack >> 12) << 10);
 
     {
         int rt = return_type->t;
         int bt = rt & VT_BTYPE;
-        if (bt == VT_BYTE || bt == VT_SHORT)
-            // Promote small integers:
-            o(0x13001c00 | (bt == VT_SHORT) << 13 |
-              (uint32_t)!!(rt & VT_UNSIGNED) << 30); // [su]xt[bh] w0,w0
-        else if (bt == VT_STRUCT && !a[0].indirect) {
+        if (bt == VT_STRUCT && !(a[0] & 1)) {
             // A struct was returned in registers, so write it out:
             gv(RC_R(8));
             --vtop;
-            if (a[0].type == PCS_IREG) {
+            if (a[0] == 0) {
                 int align, size = type_size(return_type, &align);
                 assert(size <= 16);
                 if (size > 8)
@@ -1069,12 +1116,12 @@ ST_FUNC void gfunc_call(int nb_args)
                     arm64_strx(size > 4 ? 3 : size > 2 ? 2 : size > 1, 0, 8, 0);
 
             }
-            else if (a[0].type == PCS_FREG) {
+            else if (a[0] == 16) {
                 uint32_t j, sz, n = arm64_hfa(return_type, &sz);
                 for (j = 0; j < n; j++)
                     o(0x3d000100 |
                       (sz & 16) << 19 | -(sz & 8) << 27 | (sz & 4) << 29 |
-                      (a[i].value + j) |
+                      (a[i] / 2 - 8 + j) |
                       j << 10); // str ([sdq])(*),[x8,#(j * sz)]
             }
         }
@@ -1086,33 +1133,30 @@ ST_FUNC void gfunc_call(int nb_args)
 }
 
 static unsigned long arm64_func_va_list_stack;
-#ifndef __APPLE__
 static int arm64_func_va_list_gr_offs;
 static int arm64_func_va_list_vr_offs;
-#endif
 static int arm64_func_sub_sp_offset;
 
-ST_FUNC void gfunc_prolog(CType *func_type)
+ST_FUNC void gfunc_prolog(Sym *func_sym)
 {
+    CType *func_type = &func_sym->type;
     int n = 0;
     int i = 0;
     Sym *sym;
     CType **t;
-    PCSAlloc *a;
+    unsigned long *a;
 
-    // Why doesn't the caller (gen_function) set func_vt?
-    func_vt = func_type->ref->type;
     func_vc = 144; // offset of where x8 is stored
 
     for (sym = func_type->ref; sym; sym = sym->next)
         ++n;
-    t = tcc_malloc(n * sizeof(*t));
-    a = tcc_malloc(n * sizeof(*a));
+    t = n ? tcc_malloc(n * sizeof(*t)) : NULL;
+    a = n ? tcc_malloc(n * sizeof(*a)) : NULL;
 
     for (sym = func_type->ref; sym; sym = sym->next)
         t[i++] = &sym->type;
 
-    arm64_func_va_list_stack = arm64_pcs(n - 1, -1, t, a);
+    arm64_func_va_list_stack = arm64_pcs(n - 1, t, a);
 
     o(0xa9b27bfd); // stp x29,x30,[sp,#-224]!
     o(0xad0087e0); // stp q0,q1,[sp,#16]
@@ -1125,39 +1169,35 @@ ST_FUNC void gfunc_prolog(CType *func_type)
     o(0xa90c17e4); // stp x4,x5,[sp,#192]
     o(0xa90d1fe6); // stp x6,x7,[sp,#208]
 
-#ifndef __APPLE__
     arm64_func_va_list_gr_offs = -64;
     arm64_func_va_list_vr_offs = -128;
-#endif
 
     for (i = 1, sym = func_type->ref->next; sym; i++, sym = sym->next) {
-        int off = (a[i].type == PCS_IREG ? 160 + a[i].value * 8 :
-                   a[i].type == PCS_FREG ? 16 + a[i].value * 16 :
-                   224 + a[i].value);
+        int off = (a[i] < 16 ? 160 + a[i] / 2 * 8 :
+                   a[i] < 32 ? 16 + (a[i] - 16) / 2 * 16 :
+                   224 + ((a[i] - 32) >> 1 << 1));
         sym_push(sym->v & ~SYM_FIELD, &sym->type,
-                 (a[i].indirect ? VT_LLOCAL : VT_LOCAL) | lvalue_type(sym->type.t),
+                 (a[i] & 1 ? VT_LLOCAL : VT_LOCAL) | VT_LVAL,
                  off);
 
-#ifndef __APPLE__
-        if (a[i].type == PCS_IREG) {
+        if (a[i] < 16) {
             int align, size = type_size(&sym->type, &align);
-            arm64_func_va_list_gr_offs = (a[i].value - 7 +
-                                          (!a[i].indirect && size > 8)) * 8;
+            arm64_func_va_list_gr_offs = (a[i] / 2 - 7 +
+                                          (!(a[i] & 1) && size > 8)) * 8;
         }
-        else if (a[i].type == PCS_FREG) {
+        else if (a[i] < 32) {
             uint32_t hfa = arm64_hfa(&sym->type, 0);
-            arm64_func_va_list_vr_offs = (a[i].value - 8 +
+            arm64_func_va_list_vr_offs = (a[i] / 2 - 16 +
                                           (hfa ? hfa : 1)) * 16;
         }
-#endif
 
         // HFAs of float and double need to be written differently:
-        if (a[i].type == PCS_FREG && (sym->type.t & VT_BTYPE) == VT_STRUCT) {
+        if (16 <= a[i] && a[i] < 32 && (sym->type.t & VT_BTYPE) == VT_STRUCT) {
             uint32_t j, sz, k = arm64_hfa(&sym->type, &sz);
             if (sz < 16)
                 for (j = 0; j < k; j++) {
                     o(0x3d0003e0 | -(sz & 8) << 27 | (sz & 4) << 29 |
-                      (a[i].value + j) | (off / sz + j) << 10);
+                      ((a[i] - 16) / 2 + j) | (off / sz + j) << 10);
                     // str ([sdq])(*),[sp,#(j * sz)]
                 }
         }
@@ -1172,6 +1212,10 @@ ST_FUNC void gfunc_prolog(CType *func_type)
     o(0xd503201f); // nop
     o(0xd503201f); // nop
     loc = 0;
+#ifdef CONFIG_TCC_BCHECK
+    if (tcc_state->do_bounds_check)
+        gen_bounds_prolog();
+#endif
 }
 
 ST_FUNC void gen_va_start(void)
@@ -1190,7 +1234,6 @@ ST_FUNC void gen_va_start(void)
         o(0x910383be); // add x30,x29,#224
     o(0xf900001e | r << 5); // str x30,[x(r)]
 
-#ifndef __APPLE__
     if (arm64_func_va_list_gr_offs) {
         if (arm64_func_va_list_stack)
             o(0x910383be); // add x30,x29,#224
@@ -1207,7 +1250,6 @@ ST_FUNC void gen_va_start(void)
 
     arm64_movimm(30, arm64_func_va_list_vr_offs);
     o(0xb9001c1e | r << 5); // str w30,[x(r),#28]
-#endif
 
     --vtop;
 }
@@ -1215,7 +1257,7 @@ ST_FUNC void gen_va_start(void)
 ST_FUNC void gen_va_arg(CType *t)
 {
     int align, size = type_size(t, &align);
-    int fsize, hfa = arm64_hfa(t, &fsize);
+    unsigned fsize, hfa = arm64_hfa(t, &fsize);
     uint32_t r0, r1;
 
     if (is_float(t->t)) {
@@ -1226,12 +1268,11 @@ ST_FUNC void gen_va_arg(CType *t)
     gaddrof();
     r0 = intr(gv(RC_INT));
     r1 = get_reg(RC_INT);
-    vtop[0].r = r1 | lvalue_type(t->t);
+    vtop[0].r = r1 | VT_LVAL;
     r1 = intr(r1);
 
     if (!hfa) {
         uint32_t n = size > 16 ? 8 : (size + 7) & -8;
-#ifndef __APPLE__
         o(0xb940181e | r0 << 5); // ldr w30,[x(r0),#24] // __gr_offs
         if (align == 16) {
             assert(0); // this path untested but needed for __uint128_t
@@ -1240,28 +1281,23 @@ ST_FUNC void gen_va_arg(CType *t)
         }
         o(0x310003c0 | r1 | n << 10); // adds w(r1),w30,#(n)
         o(0x540000ad); // b.le .+20
-#endif
         o(0xf9400000 | r1 | r0 << 5); // ldr x(r1),[x(r0)] // __stack
         o(0x9100001e | r1 << 5 | n << 10); // add x30,x(r1),#(n)
         o(0xf900001e | r0 << 5); // str x30,[x(r0)] // __stack
-#ifndef __APPLE__
         o(0x14000004); // b .+16
         o(0xb9001800 | r1 | r0 << 5); // str w(r1),[x(r0),#24] // __gr_offs
         o(0xf9400400 | r1 | r0 << 5); // ldr x(r1),[x(r0),#8] // __gr_top
         o(0x8b3ec000 | r1 | r1 << 5); // add x(r1),x(r1),w30,sxtw
-#endif
         if (size > 16)
             o(0xf9400000 | r1 | r1 << 5); // ldr x(r1),[x(r1)]
     }
     else {
-        uint32_t ssz = (size + 7) & -(uint32_t)8;
-#ifndef __APPLE__
         uint32_t rsz = hfa << 4;
+        uint32_t ssz = (size + 7) & -(uint32_t)8;
         uint32_t b1, b2;
         o(0xb9401c1e | r0 << 5); // ldr w30,[x(r0),#28] // __vr_offs
         o(0x310003c0 | r1 | rsz << 10); // adds w(r1),w30,#(rsz)
         b1 = ind; o(0x5400000d); // b.le lab1
-#endif
         o(0xf9400000 | r1 | r0 << 5); // ldr x(r1),[x(r0)] // __stack
         if (fsize == 16) {
             o(0x91003c00 | r1 | r1 << 5); // add x(r1),x(r1),#15
@@ -1269,7 +1305,6 @@ ST_FUNC void gen_va_arg(CType *t)
         }
         o(0x9100001e | r1 << 5 | ssz << 10); // add x30,x(r1),#(ssz)
         o(0xf900001e | r0 << 5); // str x30,[x(r0)] // __stack
-#ifndef __APPLE__
         b2 = ind; o(0x14000000); // b lab2
         // lab1:
         write32le(cur_text_section->data + b1, 0x5400000d | (ind - b1) << 3);
@@ -1293,7 +1328,6 @@ ST_FUNC void gen_va_arg(CType *t)
         }
         // lab2:
         write32le(cur_text_section->data + b2, 0x14000000 | (ind - b2) >> 2);
-#endif
     }
 }
 
@@ -1306,13 +1340,13 @@ ST_FUNC int gfunc_sret(CType *vt, int variadic, CType *ret,
 ST_FUNC void gfunc_return(CType *func_type)
 {
     CType *t = func_type;
-    PCSAlloc a;
+    unsigned long a;
 
-    arm64_pcs(0, -1, &t, &a);
-
-    if (a.type == PCS_VOID) {
-    }
-    else if (a.type == PCS_IREG && !a.indirect) {
+    arm64_pcs(0, &t, &a);
+    switch (a) {
+    case -1:
+        break;
+    case 0:
         if ((func_type->t & VT_BTYPE) == VT_STRUCT) {
             int align, size = type_size(func_type, &align);
             gaddrof();
@@ -1321,16 +1355,17 @@ ST_FUNC void gfunc_return(CType *func_type)
         }
         else
             gv(RC_IRET);
-    }
-    else if (a.indirect) {
+        break;
+    case 1: {
         CType type = *func_type;
         mk_pointer(&type);
         vset(&type, VT_LOCAL | VT_LVAL, func_vc);
         indir();
         vswap();
         vstore();
+        break;
     }
-    else if (a.type == PCS_FREG) {
+    case 16:
         if ((func_type->t & VT_BTYPE) == VT_STRUCT) {
           uint32_t j, sz, n = arm64_hfa(&vtop->type, &sz);
           gaddrof();
@@ -1342,8 +1377,8 @@ ST_FUNC void gfunc_return(CType *func_type)
         }
         else
             gv(RC_FRET);
-    }
-    else {
+        break;
+    default:
       assert(0);
     }
     vtop--;
@@ -1351,6 +1386,11 @@ ST_FUNC void gfunc_return(CType *func_type)
 
 ST_FUNC void gfunc_epilog(void)
 {
+#ifdef CONFIG_TCC_BCHECK
+    if (tcc_state->do_bounds_check)
+        gen_bounds_epilog();
+#endif
+
     if (loc) {
         // Insert instructions to subtract size of stack frame from SP.
         unsigned char *ptr = cur_text_section->data + arm64_func_sub_sp_offset;
@@ -1559,8 +1599,11 @@ static int arm64_gen_opic(int op, uint32_t l, int rev, uint64_t val,
         val = val & (n - 1);
         if (rev)
             return 0;
-        if (!val)
-            assert(0);
+        if (!val) {
+            // tcc_warning("shift count >= width of type");
+            o(0x2a0003e0 | l << 31 | a << 16);
+            return 1;
+        }
         else if (op == TOK_SHL)
             o(0x53000000 | l << 31 | l << 22 | x | a << 5 |
               (n - val) << 16 | (n - 1 - val) << 10); // lsl
@@ -1825,6 +1868,16 @@ ST_FUNC void gen_cvt_sxtw(void)
     o(0x93407c00 | r | r << 5); // sxtw x(r),w(r)
 }
 
+/* char/short to int conversion */
+ST_FUNC void gen_cvt_csti(int t)
+{
+    int r = intr(gv(RC_INT));
+    o(0x13001c00
+        | ((t & VT_BTYPE) == VT_SHORT) << 13
+        | (uint32_t)!!(t & VT_UNSIGNED) << 30
+        | r | r << 5); // [su]xt[bh] w(r),w(r)
+}
+
 ST_FUNC void gen_cvt_itof(int t)
 {
     if (t == VT_LDOUBLE) {
@@ -1884,7 +1937,7 @@ ST_FUNC void gen_cvt_ftoi(int t)
 
 ST_FUNC void gen_cvt_ftof(int t)
 {
-    int f = vtop[0].type.t;
+    int f = vtop[0].type.t & VT_BTYPE;
     assert(t == VT_FLOAT || t == VT_DOUBLE || t == VT_LDOUBLE);
     assert(f == VT_FLOAT || f == VT_DOUBLE || f == VT_LDOUBLE);
     if (t == f)
@@ -1987,135 +2040,35 @@ ST_FUNC void gen_vla_sp_restore(int addr) {
 }
 
 ST_FUNC void gen_vla_alloc(CType *type, int align) {
-    uint32_t r = intr(gv(RC_INT));
+    uint32_t r;
+#if defined(CONFIG_TCC_BCHECK)
+    if (tcc_state->do_bounds_check)
+        vpushv(vtop);
+#endif
+    r = intr(gv(RC_INT));
+#if defined(CONFIG_TCC_BCHECK)
+    if (tcc_state->do_bounds_check)
+        o(0x91004000 | r | r << 5); // add x(r),x(r),#15+1
+    else
+#endif
     o(0x91003c00 | r | r << 5); // add x(r),x(r),#15
     o(0x927cec00 | r | r << 5); // bic x(r),x(r),#15
     o(0xcb2063ff | r << 16); // sub sp,sp,x(r)
     vpop();
-}
-
-#ifdef HAVE_PTRAUTH
-ST_FUNC void gen_ptrauth_strip_i(void)
-{
-    CType type;
-    uint32_t r_dst, r_src;
-
-    type = vtop->type;
-    r_src = intr(gv(RC_INT));
-    vpop();
-
-    r_dst = get_reg(RC_INT);
-
-    o(0xaa0003e0 | r_dst | r_src << 16); // mov x(r_dst), x(r_src)
-    o(0xdac143e0 | r_dst); // xpaci x(r_dst)
-
-    vpushi(0);
-    vtop->r = r_dst;
-    vtop->type = type;
-}
-
-ST_FUNC void gen_ptrauth_strip_d(void)
-{
-    CType type;
-    uint32_t r_dst, r_src;
-
-    type = vtop->type;
-    r_src = intr(gv(RC_INT));
-    r_dst = get_reg(RC_INT);
-
-    o(0xaa0003e0 | r_dst | r_src << 16); // mov x(r_dst), x(r_src)
-    o(0xdac147e0 | r_dst); // xpacd x(r_dst)
-
-    vpop();
-    vpushi(0);
-    vtop->r = r_dst;
-    vtop->type = type;
-}
-
-ST_FUNC void gen_ptrauth_sign_ia(void)
-{
-    CType type;
-    uint32_t r_dst, r_src, r_data;
-
-    gv2(RC_INT, RC_INT);
-    r_src = vtop[-1].r;
-    r_data = vtop[0].r;
-    type = vtop[-1].type;
-    r_dst = get_reg(RC_INT);
-
-    o(0xaa0003e0 | r_dst | r_src << 16); // mov x(r_dst), x(r_src)
-    o(0xdac10000 | r_dst | r_data << 5); // pacia x(r_dst), x(r_data)
-
-    vpop();
-    vpop();
-    vpushi(0);
-    vtop->r = r_dst;
-    vtop->type = type;
-}
-
-ST_FUNC void gen_ptrauth_sign_ib(void)
-{
-    CType type;
-    uint32_t r_dst, r_src, r_data;
-
-    gv2(RC_INT, RC_INT);
-    r_src = vtop[-1].r;
-    r_data = vtop[0].r;
-    type = vtop[-1].type;
-    r_dst = get_reg(RC_INT);
-
-    o(0xaa0003e0 | r_dst | r_src << 16); // mov x(r_dst), x(r_src)
-    o(0xdac10400 | r_dst | r_data << 5); // pacib x(r_dst), x(r_data)
-
-    vpop();
-    vpop();
-    vpushi(0);
-    vtop->r = r_dst;
-    vtop->type = type;
-}
-
-ST_FUNC void gen_ptrauth_sign_da(void)
-{
-    CType type;
-    uint32_t r_dst, r_src, r_data;
-
-    gv2(RC_INT, RC_INT);
-    r_src = vtop[-1].r;
-    r_data = vtop[0].r;
-    type = vtop[-1].type;
-    r_dst = get_reg(RC_INT);
-
-    o(0xaa0003e0 | r_dst | r_src << 16); // mov x(r_dst), x(r_src)
-    o(0xdac10800 | r_dst | r_data << 5); // pacda x(r_dst), x(r_data)
-
-    vpop();
-    vpop();
-    vpushi(0);
-    vtop->r = r_dst;
-    vtop->type = type;
-}
-
-ST_FUNC void gen_ptrauth_sign_db(void)
-{
-    CType type;
-    uint32_t r_dst, r_src, r_data;
-
-    gv2(RC_INT, RC_INT);
-    r_src = vtop[-1].r;
-    r_data = vtop[0].r;
-    type = vtop[-1].type;
-    r_dst = get_reg(RC_INT);
-
-    o(0xaa0003e0 | r_dst | r_src << 16); // mov x(r_dst), x(r_src)
-    o(0xdac10c00 | r_dst | r_data << 5); // pacdb x(r_dst), x(r_data)
-
-    vpop();
-    vpop();
-    vpushi(0);
-    vtop->r = r_dst;
-    vtop->type = type;
-}
+#if defined(CONFIG_TCC_BCHECK)
+    if (tcc_state->do_bounds_check) {
+        vpushi(0);
+        vtop->r = TREG_R(0);
+        o(0x910003e0 | vtop->r); // mov r0,sp
+        vswap();
+        vpush_global_sym(&func_old_type, TOK___bound_new_region);
+        vrott(3);
+        gfunc_call(2);
+        func_bound_add_epilog = 1;
+    }
 #endif
+}
+
 /* end of A64 code generator */
 /*************************************************************/
 #endif

@@ -24,8 +24,10 @@
 # define TRIPLET_OS "linux"
 #elif defined (__FreeBSD__) || defined (__FreeBSD_kernel__)
 # define TRIPLET_OS "kfreebsd"
-#elif defined _WIN32
+#elif defined(_WIN32)
 # define TRIPLET_OS "win32"
+#elif defined(__APPLE__)
+# define TRIPLET_OS "darwin"
 #elif !defined (__GNU__)
 # define TRIPLET_OS "unknown"
 #endif
@@ -59,36 +61,63 @@ int main(int argc, char *argv[])
     _setmode(_fileno(stdout), _O_BINARY);  /* don't translate \n to \r\n */
 #endif
     switch(argc == 2 ? argv[1][0] : 0) {
-        case 'b':
+        case 'b'://igendian
         {
             volatile unsigned foo = 0x01234567;
             puts(*(unsigned char*)&foo == 0x67 ? "no" : "yes");
             break;
         }
-#ifdef __GNUC__
-        case 'm':
-            printf("%d\n", __GNUC_MINOR__);
+#if defined(__clang__)
+        case 'm'://inor
+            printf("%d\n", __clang_minor__);
             break;
-        case 'v':
-            printf("%d\n", __GNUC__);
+        case 'v'://ersion
+            printf("%d\n", __clang_major__);
             break;
-#elif defined __TINYC__
-        case 'v':
+#elif defined(__TINYC__)
+        case 'v'://ersion
             puts("0");
             break;
-        case 'm':
+        case 'm'://inor
             printf("%d\n", __TINYC__);
             break;
+#elif defined(_MSC_VER)
+        case 'v'://ersion
+            puts("0");
+            break;
+        case 'm'://inor
+            printf("%d\n", _MSC_VER);
+            break;
+#elif defined(__GNUC__) && defined(__GNUC_MINOR__)
+        /* GNU comes last as other compilers may add 'GNU' compatibility */
+        case 'm'://inor
+            printf("%d\n", __GNUC_MINOR__);
+            break;
+        case 'v'://ersion
+            printf("%d\n", __GNUC__);
+            break;
 #else
-        case 'm':
-        case 'v':
+        case 'm'://inor
+        case 'v'://ersion
             puts("0");
             break;
 #endif
-        case 't':
+        case 't'://riplet
             puts(TRIPLET);
             break;
-
+        case 'c'://ompiler
+#if defined(__clang__)
+            puts("clang");
+#elif defined(__TINYC__)
+            puts("tcc");
+#elif defined(_MSC_VER)
+            puts("msvc");
+#elif defined(__GNUC__)
+            puts("gcc");
+#else
+            puts("unknown");
+#endif
+            break;
         default:
             break;
     }

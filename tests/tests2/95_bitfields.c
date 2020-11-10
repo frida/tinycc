@@ -78,6 +78,27 @@
 }
 
 /* ----------------------------------------------------------------------- */
+#elif TEST == 7
+{
+#ifdef _WIN32
+    typedef long long int ll;
+#else
+    typedef long int ll;
+#endif
+    struct M P __s {
+        ll d : 16;
+        ll b : 16;
+        ll x : 16;
+        ll y : 1;
+        ll z : 2;
+        ll a : 11;
+        ll e : 1;
+        ll f : 1;
+    };
+    TEST_STRUCT(1,2,3,4,5);
+}
+
+/* ----------------------------------------------------------------------- */
 #elif defined PACK
 
 #if PACK
@@ -100,6 +121,8 @@ top = 0;
 #define TEST 5
 #include SELF
 #define TEST 6
+#include SELF
+#define TEST 7
 #include SELF
 
 #if PACK
