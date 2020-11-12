@@ -102,7 +102,7 @@ static void tcc_set_lib_path_w32(TCCState *s)
 static void tcc_add_systemdir(TCCState *s)
 {
     char buf[1000];
-    GetSystemDirectory(buf, sizeof buf);
+    GetSystemDirectoryA(buf, sizeof buf);
     tcc_add_library_path(s, normalize_slashes(buf));
 }
 #endif
