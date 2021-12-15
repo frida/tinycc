@@ -111,13 +111,18 @@ configure_file(
   configuration: cdata,
 )
 
+threads_dep = dependency('threads')
+dl_dep = cc.find_library('dl', required: false)
+
 tcc = library('tcc', sources,
   c_args: ['-DONE_SOURCE=0'],
   install: true,
+  dependencies: [threads_dep, dl_dep],
 )
 tcc_dep = declare_dependency(
   link_with: tcc,
   include_directories: include_directories('.'),
+  variables: {'libdir': get_option('libdir')},
 )
 
 pkg = import('pkgconfig')
