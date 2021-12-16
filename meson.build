@@ -126,9 +126,8 @@ tcc_dep = declare_dependency(
 )
 
 pkg = import('pkgconfig')
-pkg.generate(
+pkg.generate(tcc,
   name: 'libtcc',
   description: 'Tiny C Compiler',
   url: 'https://bellard.org/tcc/',
-  libraries: [tcc],
 )
