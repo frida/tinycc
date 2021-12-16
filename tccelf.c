@@ -3484,7 +3484,7 @@ static int ld_add_file(TCCState *s1, const char filename[])
 
 static int ld_add_file_list(TCCState *s1, const char *cmd, int as_needed)
 {
-    char filename[1024], libname[1024];
+    char filename[1024], libname[1024 - 6];
     int t, group, nblibs = 0, ret = 0;
     char **libs = NULL;
 
