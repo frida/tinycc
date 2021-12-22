@@ -131,3 +131,5 @@ pkg.generate(tcc,
   description: 'Tiny C Compiler',
   url: 'https://bellard.org/tcc/',
 )
+
+meson.override_dependency('libtcc', tcc_dep)
