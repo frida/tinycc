@@ -68,6 +68,8 @@ static void win64_del_function_table(void *);
 
 #ifdef __APPLE__
 static addr_t cached_page_size = 0;
+#else
+extern char **environ;
 #endif
 
 /* ------------------------------------------------------------- */
@@ -139,6 +141,9 @@ static void run_cdtors(TCCState *s1, const char *start, const char *end,
     while (a != b)
         ((void(*)(int, char **, char **))*a++)(argc, argv, envp);
 }
+
+#ifndef __APPLE__
+#endif
 
 /* launch the compiled program with the given arguments */
 LIBTCCAPI int tcc_run(TCCState *s1, int argc, char **argv)
