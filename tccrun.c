@@ -697,6 +697,9 @@ static void rt_getcontext(ucontext_t *uc, rt_context *rc)
 # elif defined(__APPLE__)
     rc->ip = uc->uc_mcontext->__ss.__pc;
     rc->fp = uc->uc_mcontext->__ss.__fp;
+# elif defined(__FreeBSD__) || defined(__FreeBSD_kernel__)
+    rc->ip = uc->uc_mcontext.mc_gpregs.gp_elr;
+    rc->fp = uc->uc_mcontext.mc_gpregs.gp_x[29];
 # else
     rc->ip = uc->uc_mcontext.pc;
     rc->fp = uc->uc_mcontext.regs[29];
