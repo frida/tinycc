@@ -1215,7 +1215,9 @@ static int rt_error(rt_frame *f, const char *fmt, ...)
 
 #ifndef _WIN32
 # include <signal.h>
-# ifndef __OpenBSD__
+# if defined(__QNX__)
+#  include <ucontext.h>
+# elif !defined(__OpenBSD__)
 #  include <sys/ucontext.h>
 # endif
 #else
@@ -1241,6 +1243,9 @@ static void rt_getcontext(ucontext_t *uc, rt_frame *rc)
 # if defined(__APPLE__)
     rc->ip = uc->uc_mcontext->__ss.__eip;
     rc->fp = uc->uc_mcontext->__ss.__ebp;
+# elif defined(__QNX__)
+    rc->ip = uc->uc_mcontext.cpu.eip;
+    rc->fp = uc->uc_mcontext.cpu.ebp;
 # elif defined(__FreeBSD__) || defined(__FreeBSD_kernel__) || defined(__DragonFly__)
     rc->ip = uc->uc_mcontext.mc_eip;
     rc->fp = uc->uc_mcontext.mc_ebp;
@@ -1277,6 +1282,9 @@ static void rt_getcontext(ucontext_t *uc, rt_frame *rc)
     rc->ip = uc->uc_mcontext.gregs[REG_RIP];
     rc->fp = uc->uc_mcontext.gregs[REG_RBP];
 # endif
+#elif defined(__arm__) && defined(__QNX__)
+    rc->ip = uc->uc_mcontext.cpu.gpr[15];
+    rc->fp = uc->uc_mcontext.cpu.gpr[11];
 #elif defined(__arm__) && defined(__NetBSD__)
     rc->ip = uc->uc_mcontext.__gregs[_REG_PC];
     rc->fp = uc->uc_mcontext.__gregs[_REG_FP];
