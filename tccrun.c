@@ -627,7 +627,9 @@ static void rt_exit(int code)
 
 #ifndef _WIN32
 # include <signal.h>
-# ifndef __OpenBSD__
+# if defined(__QNX__)
+#  include <ucontext.h>
+# elif !defined(__OpenBSD__)
 #  include <sys/ucontext.h>
 # endif
 #else
@@ -661,6 +663,9 @@ static void rt_getcontext(ucontext_t *uc, rt_context *rc)
 # elif defined(__OpenBSD__)
     rc->ip = uc->sc_eip;
     rc->fp = uc->sc_ebp;
+# elif defined(__QNX__)
+    rc->ip = uc->uc_mcontext.cpu.eip;
+    rc->fp = uc->uc_mcontext.cpu.ebp;
 # elif !defined REG_EIP && defined EIP /* fix for glibc 2.1 */
     rc->ip = uc->uc_mcontext.gregs[EIP];
     rc->fp = uc->uc_mcontext.gregs[EBP];
@@ -686,6 +691,9 @@ static void rt_getcontext(ucontext_t *uc, rt_context *rc)
 # if defined(__APPLE__)
     rc->ip = uc->uc_mcontext->__ss.__pc;
     rc->fp = uc->uc_mcontext->__ss.__r[11];
+# elif defined(__QNX__)
+    rc->ip = uc->uc_mcontext.cpu.gpr[15];
+    rc->fp = uc->uc_mcontext.cpu.gpr[11];
 # else
     rc->ip = uc->uc_mcontext.arm_pc;
     rc->fp = uc->uc_mcontext.arm_fp;
