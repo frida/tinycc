@@ -60,7 +60,7 @@ elif host_arch == 'arm'
   cdata.set('TCC_ARM_VFP', true)
 
   is_hardfloat_src = '''
-    #if !(defined(__ARM_PCS_VFP) || defined(__QNX__))
+    #ifndef __ARM_PCS_VFP
     # error Not hardfloat
     #endif
   '''
