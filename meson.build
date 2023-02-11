@@ -95,6 +95,7 @@ endif
 install_headers('libtcc.h')
 
 runtime_headers = [
+  'tcclib.h',
   'include/float.h',
   'include/ptrauth.h',
   'include/stdalign.h',
