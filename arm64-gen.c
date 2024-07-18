@@ -830,7 +830,7 @@ enum {
 } PCSType;
 
 struct PCSAlloc {
-    unsigned long
+    uint64_t
     type     : 2,
     value    : 61,
     indirect : 1;

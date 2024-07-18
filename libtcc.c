@@ -1537,7 +1537,7 @@ static int tcc_set_linker(TCCState *s, const char *option)
         } else if (link_option(option, "stack=", &p)) {
             s->pe_stack_size = strtoul(p, &end, 10);
         } else if (link_option(option, "subsystem=", &p)) {
-#if defined(TCC_TARGET_I386) || defined(TCC_TARGET_X86_64)
+#if defined(TCC_TARGET_I386) || defined(TCC_TARGET_X86_64) || defined(TCC_TARGET_ARM64)
             if (!strcmp(p, "native")) {
                 s->pe_subsystem = 1;
             } else if (!strcmp(p, "console")) {

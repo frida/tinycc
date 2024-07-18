@@ -165,7 +165,7 @@ extern long double strtold (const char *__nptr, char **__endptr);
 #  define TCC_ARM_EABI
 #  define TCC_ARM_VFP
 #  define TCC_ARM_HARDFLOAT
-# elif defined __aarch64__
+# elif defined __aarch64__ || defined _M_ARM64
 #  define TCC_TARGET_ARM64
 # elif defined __riscv
 #  define TCC_TARGET_RISCV64
@@ -185,7 +185,7 @@ extern long double strtold (const char *__nptr, char **__endptr);
 #  define TCC_IS_NATIVE
 # elif defined __arm__ && defined TCC_TARGET_ARM
 #  define TCC_IS_NATIVE
-# elif defined __aarch64__ && defined TCC_TARGET_ARM64
+# elif (defined __aarch64__ || defined _M_ARM64) && defined TCC_TARGET_ARM64
 #  define TCC_IS_NATIVE
 # elif defined __riscv && defined __LP64__ && defined TCC_TARGET_RISCV64
 #  define TCC_IS_NATIVE
@@ -901,7 +901,7 @@ struct TCCState {
     unsigned pe_file_align;
     unsigned pe_stack_size;
     addr_t pe_imagebase;
-# ifdef TCC_TARGET_X86_64
+# if defined(TCC_TARGET_X86_64) || defined(TCC_TARGET_ARM64)
     Section *uw_pdata;
     int uw_sym;
     unsigned uw_offs;

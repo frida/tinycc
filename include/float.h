@@ -39,7 +39,7 @@
 #define LDBL_MAX 1.18973149535723176502e+4932L
 #define LDBL_MAX_10_EXP 4932
 
-#elif defined __aarch64__ || defined __riscv
+#elif defined __aarch64__ || defined _M_ARM64 || defined __riscv
 /*
  * Use values from:
  * gcc -dM -E -xc /dev/null | grep LDBL | sed -e "s/__//g"

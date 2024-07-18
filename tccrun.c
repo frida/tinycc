@@ -643,9 +643,15 @@ static void rt_exit(int code)
 static void rt_getcontext(ucontext_t *uc, rt_context *rc)
 {
 #if defined _WIN64
+# if defined _M_ARM64
+    rc->ip = uc->Pc;
+    rc->fp = uc->Fp;
+    rc->sp = uc->Sp;
+# else
     rc->ip = uc->Rip;
     rc->fp = uc->Rbp;
     rc->sp = uc->Rsp;
+# endif
 #elif defined _WIN32
     rc->ip = uc->Eip;
     rc->fp = uc->Ebp;
@@ -886,7 +892,7 @@ static int rt_get_caller_pc(addr_t *paddr, rt_context *rc, int level)
 #endif
 }
 
-#elif defined(__aarch64__)
+#elif defined(__aarch64__) || defined(_M_ARM64)
 static int rt_get_caller_pc(addr_t *paddr, rt_context *rc, int level)
 {
     if (level == 0) {
