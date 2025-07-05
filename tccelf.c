@@ -1123,7 +1123,7 @@ ST_FUNC void relocate_syms(TCCState *s1, Section *symtab, int do_resolve)
                         goto found;
                     }
                 }
-#if defined TCC_IS_NATIVE && !defined TCC_TARGET_PE
+#if defined TCC_IS_NATIVE && !defined TCC_TARGET_PE && !defined TCC_TARGET_NO_OS
                 /* dlsym() needs the undecorated name.  */
                 const char *name_ud = &name[s1->leading_underscore];
                 void *addr = NULL;
@@ -1766,7 +1766,11 @@ static void tcc_tcov_add_file(TCCState *s1, const char *filename)
     if (filename[0] == '/')
         cstr_printf (&cstr, "%s.tcov", filename);
     else {
+#ifdef TCC_TARGET_NO_OS
+        wd[0] = '\0';
+#else
         getcwd (wd, sizeof(wd));
+#endif
         cstr_printf (&cstr, "%s/%s.tcov", wd, filename);
     }
     ptr = section_ptr_add(tcov_section, cstr.size + 1);

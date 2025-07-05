@@ -42,7 +42,7 @@
 #ifndef _WIN32
 # include <unistd.h>
 # include <sys/time.h>
-# ifndef CONFIG_TCC_STATIC
+# if !defined CONFIG_TCC_STATIC && !defined TCC_TARGET_NO_OS
 #  include <dlfcn.h>
 # endif
 /* XXX: need to define this to use them in non ISOC99 context */
@@ -247,7 +247,11 @@ extern long double strtold (const char *__nptr, char **__endptr);
 
 /* support using libtcc from threads */
 #ifndef CONFIG_TCC_SEMLOCK
-# define CONFIG_TCC_SEMLOCK 1
+# ifdef TCC_TARGET_NO_OS
+#  define CONFIG_TCC_SEMLOCK 0
+# else
+#  define CONFIG_TCC_SEMLOCK 1
+# endif
 #endif
 
 /* ------------ path configuration ------------ */

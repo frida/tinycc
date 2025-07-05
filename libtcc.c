@@ -498,6 +498,9 @@ PUB_FUNC void tcc_memcheck(int d)
 /* for #pragma once */
 ST_FUNC int normalized_PATHCMP(const char *f1, const char *f2)
 {
+#ifdef TCC_TARGET_NO_OS
+    return PATHCMP(f1, f2);
+#else
     char *p1, *p2;
     int ret = 1;
     if (!!(p1 = realpath(f1, NULL))) {
@@ -508,6 +511,7 @@ ST_FUNC int normalized_PATHCMP(const char *f1, const char *f2)
         libc_free(p1);
     }
     return ret;
+#endif
 }
 
 /********************************************************/
@@ -1100,7 +1104,7 @@ static int tcc_add_binary(TCCState *s1, int flags, const char *filename, int fd)
 #if defined TCC_TARGET_UNIX
     case AFF_BINTYPE_DYN:
         if (s1->output_type == TCC_OUTPUT_MEMORY) {
-#ifdef TCC_IS_NATIVE
+#if defined TCC_IS_NATIVE && !defined TCC_TARGET_NO_OS
             void* dl = dlopen(filename, RTLD_GLOBAL | RTLD_LAZY);
             if (dl)
                 tcc_add_dllref(s1, filename, 0)->handle = dl;
@@ -1120,7 +1124,7 @@ static int tcc_add_binary(TCCState *s1, int flags, const char *filename, int fd)
     case AFF_BINTYPE_DYN:
     case_dyn_or_tbd:
         if (s1->output_type == TCC_OUTPUT_MEMORY) {
-#ifdef TCC_IS_NATIVE
+#if defined TCC_IS_NATIVE && !defined TCC_TARGET_NO_OS
             void* dl;
             const char* soname = filename;
             char *tmp = 0;

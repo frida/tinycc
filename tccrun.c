@@ -75,7 +75,7 @@ static void rt_exit(rt_frame *f, int code);
 /* defined when included from lib/bt-exe.c */
 #ifndef CONFIG_TCC_BACKTRACE_ONLY
 
-#ifndef _WIN32
+#if !defined _WIN32 && !defined TCC_TARGET_NO_OS
 # include <sys/mman.h>
 #endif
 
@@ -183,7 +183,9 @@ ST_FUNC void tcc_run_free(TCCState *s1)
     for ( i = 0; i < s1->nb_loaded_dlls; i++) {
         DLLReference *ref = s1->loaded_dlls[i];
         if ( ref->handle )
-#ifdef _WIN32
+#if defined TCC_TARGET_NO_OS
+            ;
+#elif defined _WIN32
             FreeLibrary((HMODULE)ref->handle);
 #else
             dlclose(ref->handle);
@@ -218,7 +220,9 @@ LIBTCCAPI int tcc_run(TCCState *s1, int argc, char **argv)
     const char *top_sym;
     jmp_buf main_jb;
 
-#if defined(__APPLE__)
+#if defined TCC_TARGET_NO_OS
+    char **envp = NULL;
+#elif defined(__APPLE__)
     extern char ***_NSGetEnviron(void);
     char **envp = *_NSGetEnviron();
 #elif defined(__OpenBSD__) || defined(__NetBSD__)  || defined(__FreeBSD__)
@@ -480,6 +484,8 @@ static int protect_pages(void *ptr, unsigned long length, int mode)
     DWORD old;
     if (!VirtualProtect(ptr, length, protect[mode], &old))
         return -1;
+#elif defined TCC_TARGET_NO_OS
+    /* left to the embedder */
 #else
     static const unsigned char protect[] = {
         PROT_READ | PROT_EXEC,
@@ -1213,7 +1219,8 @@ static int rt_error(rt_frame *f, const char *fmt, ...)
 
 /* ------------------------------------------------------------- */
 
-#ifndef _WIN32
+#if defined TCC_TARGET_NO_OS
+#elif !defined _WIN32
 # include <signal.h>
 # if defined(__QNX__)
 #  include <ucontext.h>
@@ -1225,6 +1232,7 @@ static int rt_error(rt_frame *f, const char *fmt, ...)
 #endif
 
 /* translate from ucontext_t* to internal rt_context * */
+#ifndef TCC_TARGET_NO_OS
 static void rt_getcontext(ucontext_t *uc, rt_frame *rc)
 {
 #if defined _WIN64 && defined __aarch64__
@@ -1322,9 +1330,16 @@ static void rt_getcontext(ucontext_t *uc, rt_frame *rc)
     rc->fp = uc->uc_mcontext.__gregs[REG_S0];
 #endif
 }
+#endif
 
 /* ------------------------------------------------------------- */
-#ifndef _WIN32
+#if defined TCC_TARGET_NO_OS
+
+static void set_exception_handler(void)
+{
+}
+
+#elif !defined _WIN32
 /* signal handler for fatal errors */
 static void sig_error(int signum, siginfo_t *siginf, void *puc)
 {
