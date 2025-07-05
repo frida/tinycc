@@ -26,6 +26,8 @@ if host_os == 'windows'
 elif host_os == 'darwin'
   sources += 'tccmacho.c'
   cdata.set('TCC_TARGET_MACHO', true)
+elif host_os == 'none'
+  cdata.set('TCC_TARGET_NO_OS', true)
 endif
 
 host_arch = host_machine.cpu_family()

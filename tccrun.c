@@ -54,7 +54,7 @@ static void rt_exit(int code);
 #ifdef __APPLE__
 # include <libkern/OSCacheControl.h>
 #endif
-#ifndef _WIN32
+#if !defined(_WIN32) && !defined(TCC_TARGET_NO_OS)
 # include <sys/mman.h>
 #endif
 
@@ -332,6 +332,8 @@ static void set_pages_executable(TCCState *s1, void *ptr, unsigned long length)
 #ifdef _WIN32
     unsigned long old_protect;
     VirtualProtect(ptr, length, PAGE_EXECUTE_READWRITE, &old_protect);
+#elif defined(TCC_TARGET_NO_OS)
+    /* XXX: We'll assume this is handled externally for now */
 #else
     void __clear_cache(void *beginning, void *end);
 # ifndef HAVE_SELINUX
@@ -607,6 +609,8 @@ static int _rt_error(void *fp, void *ip, const char *fmt, va_list ap)
     return 0;
 }
 
+#ifndef TCC_TARGET_NO_OS
+
 /* emit a run time error at position 'pc' */
 static int rt_error(const char *fmt, ...)
 {
@@ -618,6 +622,8 @@ static int rt_error(const char *fmt, ...)
     return ret;
 }
 
+#endif
+
 static void rt_exit(int code)
 {
     rt_context *rc = &g_rtctxt;
@@ -627,6 +633,14 @@ static void rt_exit(int code)
 }
 
 /* ------------------------------------------------------------- */
+
+#ifdef TCC_TARGET_NO_OS
+
+static void set_exception_handler(void)
+{
+}
+
+#else
 
 #ifndef _WIN32
 # include <signal.h>
@@ -843,6 +857,8 @@ static void set_exception_handler(void)
 {
     SetUnhandledExceptionFilter(cpu_exception_handler);
 }
+
+#endif
 
 #endif
 

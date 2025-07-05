@@ -137,7 +137,7 @@ ST_FUNC void tccelf_delete(TCCState *s1)
     dynarray_reset(&s1->priv_sections, &s1->nb_priv_sections);
 
     /* free any loaded DLLs */
-#ifdef TCC_IS_NATIVE
+#if defined TCC_IS_NATIVE && !defined TCC_TARGET_NO_OS
     for ( i = 0; i < s1->nb_loaded_dlls; i++) {
         DLLReference *ref = s1->loaded_dlls[i];
         if ( ref->handle )
@@ -940,7 +940,7 @@ ST_FUNC void relocate_syms(TCCState *s1, Section *symtab, int do_resolve)
 
             /* Use ld.so to resolve symbol for us (for tcc -run) */
             if (do_resolve) {
-#if defined TCC_IS_NATIVE && !defined TCC_TARGET_PE
+#if defined TCC_IS_NATIVE && !defined TCC_TARGET_PE && !defined TCC_TARGET_NO_OS
 #ifdef TCC_TARGET_MACHO
                 /* The symbols in the symtables have a prepended '_'
                    but dlsym() needs the undecorated name.  */

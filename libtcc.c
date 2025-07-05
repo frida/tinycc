@@ -1163,7 +1163,7 @@ ST_FUNC int tcc_add_file_internal(TCCState *s1, const char *filename, int flags)
         case AFF_BINTYPE_DYN:
             if (s1->output_type == TCC_OUTPUT_MEMORY) {
                 ret = 0;
-#ifdef TCC_IS_NATIVE
+#if defined(TCC_IS_NATIVE) && !defined(TCC_TARGET_NO_OS)
                 if (NULL == dlopen(filename, RTLD_GLOBAL | RTLD_LAZY))
                     ret = -1;
 #endif
