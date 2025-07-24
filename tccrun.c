@@ -59,7 +59,6 @@ static void rt_exit(int code);
 #endif
 
 static void set_pages_executable(TCCState *s1, void *ptr, unsigned long length);
-static int tcc_relocate_ex(TCCState *s1, void *ptr, addr_t ptr_diff);
 
 #ifdef _WIN64
 static void *win64_add_function_table(TCCState *s1);
@@ -225,7 +224,7 @@ LIBTCCAPI int tcc_run(TCCState *s1, int argc, char **argv)
 
 /* relocate code. Return -1 on error, required size if ptr is NULL,
    otherwise copy code into buffer passed by the caller */
-static int tcc_relocate_ex(TCCState *s1, void *ptr, addr_t ptr_diff)
+int tcc_relocate_ex(TCCState *s1, void *ptr, size_t ptr_diff)
 {
     Section *s;
     unsigned offset, length, align, max_align, i, k, f;
@@ -249,7 +248,12 @@ static int tcc_relocate_ex(TCCState *s1, void *ptr, addr_t ptr_diff)
     offset += sizeof (void*); /* space for function_table pointer */
 #endif
     for (k = 0; k < 2; ++k) {
-        f = 0, addr = k ? mem : mem + ptr_diff;
+        f = 0;
+#if defined(TCC_TARGET_MACHO)
+        addr = mem + ptr_diff;
+#else
+        addr = k ? mem : mem + ptr_diff;
+#endif
         for(i = 1; i < s1->nb_sections; i++) {
             s = s1->sections[i];
             if (0 == (s->sh_flags & SHF_ALLOC))
@@ -300,7 +304,9 @@ static int tcc_relocate_ex(TCCState *s1, void *ptr, addr_t ptr_diff)
             continue;
         length = s->data_offset;
         ptr = (void*)s->sh_addr;
+#if !defined(TCC_TARGET_MACHO)
         if (s->sh_flags & SHF_EXECINSTR)
+#endif
             ptr = (char*)((addr_t)ptr - ptr_diff);
         if (NULL == s->data || s->sh_type == SHT_NOBITS)
             memset(ptr, 0, length);

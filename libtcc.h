@@ -105,6 +105,11 @@ LIBTCCAPI int tcc_relocate(TCCState *s1, void *ptr);
    returns -1 if error. */
 #define TCC_RELOCATE_AUTO (void*)1
 
+/* lower level version of tcc_relocate without internal allocation, the
+   ptr_diff argument can be set when the writable memory in ptr is
+   a writable view displaced from the actual executable memory */
+LIBTCCAPI int tcc_relocate_ex(TCCState *s1, void *ptr, size_t ptr_diff);
+
 /* return symbol value or NULL if not found */
 LIBTCCAPI void *tcc_get_symbol(TCCState *s, const char *name);
 
