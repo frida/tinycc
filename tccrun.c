@@ -80,7 +80,6 @@ static void rt_exit(rt_frame *f, int code);
 #endif
 
 static int protect_pages(void *ptr, unsigned long length, int mode);
-static int tcc_relocate_ex(TCCState *s1, void *ptr, unsigned ptr_diff);
 static void st_link(TCCState *s1);
 static void st_unlink(TCCState *s1);
 #ifdef CONFIG_TCC_BACKTRACE
@@ -331,7 +330,7 @@ static void cleanup_sections(TCCState *s1)
 
 /* relocate code. Return -1 on error, required size if ptr is NULL,
    otherwise copy code into buffer passed by the caller */
-static int tcc_relocate_ex(TCCState *s1, void *ptr, unsigned ptr_diff)
+LIBTCCAPI int tcc_relocate_ex(TCCState *s1, void *ptr, size_t ptr_diff)
 {
     Section *s;
     unsigned offset, length, align, i, k, f;
@@ -379,9 +378,13 @@ redo:
                 if (s1->verbose == 2)
                     printf("%d: %-16s %p  len %05x  align %04x\n",
                         k, s->name, (void*)s->sh_addr, length, s->sh_addralign);
+#ifdef TCC_TARGET_MACHO
+                ptr = (void*)(s->sh_addr - ptr_diff);
+#else
                 ptr = (void*)s->sh_addr;
                 if (k == 0)
                     ptr = (void*)(s->sh_addr + ptr_diff);
+#endif
                 if (NULL == s->data || s->sh_type == SHT_NOBITS)
                     memset(ptr, 0, length);
                 else
@@ -406,7 +409,11 @@ redo:
                     align = PAGESIZE;
             }
             s->sh_addralign = align;
+#ifdef TCC_TARGET_MACHO
+            addr = mem + ptr_diff;
+#else
             addr = k ? mem + ptr_diff : mem;
+#endif
             offset += -(addr + offset) & (align - 1);
             s->sh_addr = mem ? addr + offset : 0;
             offset += length;
