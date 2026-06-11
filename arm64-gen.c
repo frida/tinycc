@@ -453,6 +453,17 @@ static void arm64_strv(int sz_, int dst, int bas, uint64_t off)
 
 static void arm64_sym(int r, Sym *sym, unsigned long addend)
 {
+#ifdef TCC_TARGET_PE
+    /* PE has no GOT; materialise the full 64-bit absolute address inline. */
+    greloca(cur_text_section, sym, ind, R_AARCH64_MOVW_UABS_G0_NC, addend);
+    o(0xd2800000 | r);            // movz xr, #:abs_g0_nc:sym
+    greloca(cur_text_section, sym, ind, R_AARCH64_MOVW_UABS_G1_NC, addend);
+    o(0xf2a00000 | r);            // movk xr, #:abs_g1_nc:sym, lsl #16
+    greloca(cur_text_section, sym, ind, R_AARCH64_MOVW_UABS_G2_NC, addend);
+    o(0xf2c00000 | r);            // movk xr, #:abs_g2_nc:sym, lsl #32
+    greloca(cur_text_section, sym, ind, R_AARCH64_MOVW_UABS_G3, addend);
+    o(0xf2e00000 | r);            // movk xr, #:abs_g3:sym, lsl #48
+#else
     greloca(cur_text_section, sym, ind, R_AARCH64_ADR_GOT_PAGE, 0);
     o(0x90000000 | r);            // adrp xr, #sym
     greloca(cur_text_section, sym, ind, R_AARCH64_LD64_GOT_LO12_NC, 0);
@@ -475,6 +486,7 @@ static void arm64_sym(int r, Sym *sym, unsigned long addend)
 	    }
         }
     }
+#endif
 }
 
 static void arm64_load_cmp(int r, SValue *sv);
@@ -860,6 +872,7 @@ static unsigned long arm64_pcs_aux(int n, int nb_fixed, CType **type,
     for (i = 0; i < n; i++) {
         int hfa = arm64_hfa(type[i], 0);
         int size, align;
+        int pe_variadic = 0;
 
 #ifdef __APPLE__
         if (i == nb_fixed) {
@@ -867,6 +880,15 @@ static unsigned long arm64_pcs_aux(int n, int nb_fixed, CType **type,
             nv = 8;
 
             align_and_enlarge_small = 1;
+        }
+#endif
+
+#ifdef TCC_TARGET_PE
+        /* Windows passes variadic args in the GP registers and stack, never
+           the SIMD/FP ones, so floats and HFAs go as plain integers. */
+        if (nb_fixed >= 0 && i >= nb_fixed) {
+            pe_variadic = 1;
+            hfa = 0;
         }
 #endif
 
@@ -895,7 +917,7 @@ static unsigned long arm64_pcs_aux(int n, int nb_fixed, CType **type,
             size = (size + 7) & ~7;
 
         // C.1
-        if (is_float(type[i]->t) && nv < 8) {
+        if (is_float(type[i]->t) && nv < 8 && !pe_variadic) {
             a[i] = PCS_ALLOC_MAKE_FREG(nv++);
             continue;
         }
@@ -925,7 +947,7 @@ static unsigned long arm64_pcs_aux(int n, int nb_fixed, CType **type,
             size = 8;
 
         // C.6
-        if (hfa || is_float(type[i]->t)) {
+        if ((hfa || is_float(type[i]->t)) && !pe_variadic) {
             a[i] = PCS_ALLOC_MAKE_STACK(ns);
             ns += size;
             continue;
@@ -1151,6 +1173,11 @@ ST_FUNC void gfunc_call(int nb_args)
                     arm64_ldrs(a[i].value, size);
                 }
             }
+            else if (is_float(vtop->type.t)) {
+                gv(RC_FLOAT);
+                o(0x9e660000 | a[i].value | fltr(vtop[0].r) << 5);
+                // fmov x(value),d(n) -- variadic float in a GP register
+            }
             else
                 gv(RC_R(a[i].value));
         }
@@ -1325,6 +1352,28 @@ ST_FUNC void gen_va_start(void)
     gaddrof();
     r = intr(gv(RC_INT));
 
+#if defined(__APPLE__) || defined(TCC_TARGET_PE)
+    /* macOS and Windows use a single-pointer va_list. The spilled GP registers
+       at x29+160..216 are contiguous with the stack arguments at x29+224, so
+       the variadic arguments form one linear array. macOS puts them all on the
+       stack; Windows may begin them inside the GP save area (negative
+       gr_offs). */
+    {
+# ifdef TCC_TARGET_PE
+        int off = 224 + (arm64_func_va_list_gr_offs < 0
+                         ? arm64_func_va_list_gr_offs
+                         : (int) arm64_func_va_list_stack);
+# else
+        int off = 224 + (int) arm64_func_va_list_stack;
+# endif
+        arm64_movimm(30, off);
+        o(0x8b1e03be); // add x30,x29,x30
+        o(0xf900001e | r << 5); // str x30,[x(r)]
+    }
+    --vtop;
+    return;
+#endif
+
     if (arm64_func_va_list_stack) {
         //xx could use add (immediate) here
         arm64_movimm(30, arm64_func_va_list_stack + 224);
@@ -1362,10 +1411,16 @@ ST_FUNC void gen_va_arg(CType *t)
     unsigned fsize, hfa = arm64_hfa(t, &fsize);
     uint32_t r0, r1;
 
+#ifdef TCC_TARGET_PE
+    /* Windows has no HFAs in varargs; everything takes the plain __stack
+       path below (aggregates >16 bytes by reference), shared with macOS. */
+    hfa = 0;
+#else
     if (is_float(t->t)) {
         hfa = 1;
         fsize = size;
     }
+#endif
 
     gaddrof();
     r0 = intr(gv(RC_INT));
@@ -1375,7 +1430,7 @@ ST_FUNC void gen_va_arg(CType *t)
 
     if (!hfa) {
         uint32_t n = size > 16 ? 8 : (size + 7) & -8;
-#ifndef __APPLE__
+#if !defined(__APPLE__) && !defined(TCC_TARGET_PE)
         o(0xb940181e | r0 << 5); // ldr w30,[x(r0),#24] // __gr_offs
         if (align == 16) {
             assert(0); // this path untested but needed for __uint128_t
@@ -1388,7 +1443,7 @@ ST_FUNC void gen_va_arg(CType *t)
         o(0xf9400000 | r1 | r0 << 5); // ldr x(r1),[x(r0)] // __stack
         o(0x9100001e | r1 << 5 | n << 10); // add x30,x(r1),#(n)
         o(0xf900001e | r0 << 5); // str x30,[x(r0)] // __stack
-#ifndef __APPLE__
+#if !defined(__APPLE__) && !defined(TCC_TARGET_PE)
         o(0x14000004); // b .+16
         o(0xb9001800 | r1 | r0 << 5); // str w(r1),[x(r0),#24] // __gr_offs
         o(0xf9400400 | r1 | r0 << 5); // ldr x(r1),[x(r0),#8] // __gr_top

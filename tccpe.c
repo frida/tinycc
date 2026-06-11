@@ -1282,6 +1282,24 @@ static int pe_check_symbols(struct pe_info *pe)
                     type = STT_OBJECT;
             }
 
+#ifdef TCC_TARGET_ARM64
+            {
+                /* Data bound to a concrete address via tcc_add_symbol() is
+                   reached by absolute addressing (see arm64_sym), so resolve it
+                   in place rather than through the IAT. */
+                ElfW(Sym) *dyn_sym =
+                    (ElfW(Sym) *)s1->dynsymtab_section->data + imp_sym;
+                int dll_index = dyn_sym->st_size;
+                int directly_provided =
+                    dyn_sym->st_shndx == SHN_ABS && dll_index == 0;
+                if (type != STT_FUNC && directly_provided) {
+                    sym->st_value = dyn_sym->st_value;
+                    sym->st_shndx = SHN_ABS;
+                    continue;
+                }
+            }
+#endif
+
             is = pe_add_import(pe, imp_sym);
 
             if (type == STT_FUNC) {
@@ -1299,6 +1317,13 @@ static int pe_check_symbols(struct pe_info *pe)
                     p = section_ptr_add(text_section, 8+4); // room for code and address
                     (*(DWORD*)(p)) = 0xE59FC000; // arm code ldr ip, [pc] ; PC+8+0 = 0001xxxx
                     (*(DWORD*)(p+2)) = 0xE59CF000; // arm code ldr pc, [ip]
+#elif defined TCC_TARGET_ARM64
+                    /* ldr x16, #16 ; ldr x16, [x16] ; br x16 ; nop ; <iat addr> */
+                    p = section_ptr_add(text_section, 16 + 8);
+                    ((DWORD*)p)[0] = 0x58000090; // ldr x16, #16  (load iat slot addr)
+                    ((DWORD*)p)[1] = 0xf9400210; // ldr x16, [x16] (load target)
+                    ((DWORD*)p)[2] = 0xd61f0200; // br x16
+                    ((DWORD*)p)[3] = 0xd503201f; // nop (pad to 8-align the addr)
 #else
                     p = section_ptr_add(text_section, 8);
                     *p = 0x25FF;
@@ -1316,8 +1341,11 @@ static int pe_check_symbols(struct pe_info *pe)
 #ifdef TCC_TARGET_ARM
                     put_elf_reloc(symtab_section, text_section,
                         offset + 8, R_XXX_THUNKFIX, is->iat_index); // offset to IAT position
+#elif defined TCC_TARGET_ARM64
+                    put_elf_reloc(symtab_section, text_section,
+                        offset + 16, R_XXX_THUNKFIX, is->iat_index); // 64-bit IAT addr
 #else
-                    put_elf_reloc(symtab_section, text_section, 
+                    put_elf_reloc(symtab_section, text_section,
                         offset + 2, R_XXX_THUNKFIX, is->iat_index);
 #endif
                     is->thk_offset = offset;

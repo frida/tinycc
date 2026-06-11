@@ -3675,7 +3675,8 @@ static void tcc_predefs(CString *cstr)
     "#define __builtin_va_start(ap,last) (ap=((char*)&(last))+((sizeof(last)+3)&~3))\n"
     "#define __builtin_va_arg(ap,type) (ap=(void*)((_tcc_align(ap,type)+sizeof(type)+3)&~3),*(type*)(ap-((sizeof(type)+3)&~3)))\n"
 #elif defined TCC_TARGET_ARM64
-# if defined(__APPLE__)
+# if defined(__APPLE__) || defined(TCC_TARGET_PE)
+    /* macOS and Windows use a plain pointer, not the AAPCS64 struct. */
     "typedef char*__builtin_va_list;\n"
 # else
     "typedef struct{\n"
