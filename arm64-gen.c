@@ -508,10 +508,22 @@ static void arm64_sym(int r, Sym *sym, addr_t addend)
         }
 #endif
     } else {
+#ifdef TCC_TARGET_PE
+        /* PE has no GOT; materialise the full 64-bit absolute address inline. */
+        arm64_reloca(sym, R_AARCH64_MOVW_UABS_G0_NC, addend);
+        o(0xd2800000 | r); /* movz xr, #:abs_g0_nc:sym */
+        arm64_reloca(sym, R_AARCH64_MOVW_UABS_G1_NC, addend);
+        o(0xf2a00000 | r); /* movk xr, #:abs_g1_nc:sym, lsl #16 */
+        arm64_reloca(sym, R_AARCH64_MOVW_UABS_G2_NC, addend);
+        o(0xf2c00000 | r); /* movk xr, #:abs_g2_nc:sym, lsl #32 */
+        arm64_reloca(sym, R_AARCH64_MOVW_UABS_G3, addend);
+        o(0xf2e00000 | r); /* movk xr, #:abs_g3:sym, lsl #48 */
+#else
         arm64_reloca(sym, R_AARCH64_ADR_PREL_PG_HI21, addend);
         o(ARM64_ADRP | r); /* adrp xr, #sym */
         arm64_reloca(sym, R_AARCH64_ADD_ABS_LO12_NC, addend);
         o(ARM64_ADD_IMM | ARM64_SF(1) | ARM64_RN(r) | r); /* add xr, xr, #sym */
+#endif
     }
 }
 
