@@ -5964,7 +5964,7 @@ ST_FUNC void unary(void)
         break;
 #endif
 #ifdef TCC_TARGET_X86_64
-#ifdef TCC_TARGET_PE
+#ifdef TCC_ABI_MS
     case TOK_builtin_va_start:
 	parse_builtin_params(0, "ee");
         r = vtop->r & VT_VALMASK;

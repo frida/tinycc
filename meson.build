@@ -112,6 +112,13 @@ runtime_headers = [
 ]
 install_headers(runtime_headers, install_dir: tccdir / 'include')
 
+# Which convention the code we generate has to follow. It is the host's own everywhere except
+# on a bare-metal target aimed at a kernel that does not share it, where the machine says so and
+# the object format is still ELF.
+if meson.get_external_property('target_abi', '') == 'microsoft'
+  cdata.set('TCC_ABI_MS', 1)
+endif
+
 configure_file(
   output: 'config.h',
   configuration: cdata,

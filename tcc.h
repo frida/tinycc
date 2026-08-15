@@ -185,6 +185,13 @@ extern long double strtold (const char *__nptr, char **__endptr);
 # endif
 #endif
 
+/* The convention a function follows is not the same question as the object format it ends up
+   in. A Windows kernel loads an ELF image from us, and the code inside it still has to call
+   the way that kernel does, so the build may have said which already. PE implies it. */
+#if defined TCC_TARGET_X86_64 && defined TCC_TARGET_PE
+# define TCC_ABI_MS 1
+#endif
+
 /* only native compiler supports -run */
 #if defined _WIN32 == defined TCC_TARGET_PE \
     && defined __APPLE__ == defined TCC_TARGET_MACHO
@@ -236,7 +243,7 @@ extern long double strtold (const char *__nptr, char **__endptr);
 
 /* No ten-byte long doubles on window and macos except in
    cross-compilers made by a mingw-GCC */
-#if defined TCC_TARGET_PE \
+#if defined TCC_TARGET_PE || defined TCC_ABI_MS \
     || (defined TCC_TARGET_MACHO && defined TCC_TARGET_ARM64)
 # define TCC_USING_DOUBLE_FOR_LDOUBLE 1
 #endif
@@ -1531,7 +1538,7 @@ ST_FUNC int expr_const(void);
 #if defined CONFIG_TCC_BCHECK || defined TCC_TARGET_C67
 ST_FUNC Sym *get_sym_ref(CType *type, Section *sec, unsigned long offset, unsigned long size);
 #endif
-#if defined TCC_TARGET_X86_64 && !defined TCC_TARGET_PE
+#if defined TCC_TARGET_X86_64 && !defined TCC_ABI_MS
 ST_FUNC int classify_x86_64_va_arg(CType *ty);
 #endif
 #ifdef CONFIG_TCC_BCHECK
