@@ -152,7 +152,7 @@ static unsigned long func_bound_ind;
 ST_DATA int func_bound_add_epilog;
 #endif
 
-#ifdef TCC_TARGET_PE
+#ifdef TCC_ABI_MS
 static int func_scratch, func_alloca;
 #endif
 
@@ -662,7 +662,7 @@ static void gen_bounds_call(int v)
 #endif
 }
 
-#ifdef TCC_TARGET_PE
+#ifdef TCC_ABI_MS
 # define TREG_FASTCALL_1 TREG_RCX
 #else
 # define TREG_FASTCALL_1 TREG_RDI
@@ -716,7 +716,7 @@ static void gen_bounds_epilog(void)
 }
 #endif
 
-#ifdef TCC_TARGET_PE
+#ifdef TCC_ABI_MS
 
 #define REGN 4
 static const uint8_t arg_regs[REGN] = {
@@ -1021,13 +1021,18 @@ void gfunc_epilog(void)
     ind = func_sub_sp_offset - FUNC_PROLOG_SIZE;
     v = -loc;
 
+    /* Probing a large frame is what the runtime beneath a Windows program does; a kernel has
+       no such helper to call, and the stack it lends is not one that grows. */
+#ifdef TCC_TARGET_PE
     if (v >= 4096) {
         Sym *sym = external_global_sym(TOK___chkstk, &func_old_type);
         oad(0xb8, v); /* mov stacksize, %eax */
         oad(0xe8, 0); /* call __chkstk, (does the stackframe too) */
         greloca(cur_text_section, sym, ind-4, R_X86_64_PC32, -4);
         o(0x90); /* fill for FUNC_PROLOG_SIZE = 11 bytes */
-    } else {
+    } else
+#endif
+    {
         o(0xe5894855);  /* push %rbp, mov %rsp, %rbp */
         o(0xec8148);  /* sub rsp, stacksize */
         gen_le32(v);
@@ -1037,7 +1042,9 @@ void gfunc_epilog(void)
     gsym_addr(func_alloca, -func_scratch);
 
     cur_text_section->data_offset = saved_ind;
+#ifdef TCC_TARGET_PE
     pe_add_unwind_data(ind, saved_ind, v);
+#endif
     ind = cur_text_section->data_offset;
 }
 
@@ -1610,7 +1617,7 @@ void gfunc_epilog(void)
     ind = saved_ind;
 }
 
-#endif /* not PE */
+#endif /* not the Microsoft convention */
 
 ST_FUNC void gen_fill_nops(int bytes)
 {

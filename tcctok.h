@@ -158,7 +158,7 @@
      DEF(TOK_builtin_return_address, "__builtin_return_address")
      DEF(TOK_builtin_expect, "__builtin_expect")
      /*DEF(TOK_builtin_va_list, "__builtin_va_list")*/
-#if defined TCC_TARGET_PE && defined TCC_TARGET_X86_64
+#if defined TCC_ABI_MS
      DEF(TOK_builtin_va_start, "__builtin_va_start")
 #elif defined TCC_TARGET_X86_64
      DEF(TOK_builtin_va_arg_types, "__builtin_va_arg_types")
@@ -318,11 +318,10 @@
      DEF(TOK___bound_local_delete, "__bound_local_delete")
      DEF(TOK___bound_setjmp, "__bound_setjmp")
      DEF(TOK___bound_new_region, "__bound_new_region")
-# ifdef TCC_TARGET_PE
-#  ifdef TCC_TARGET_X86_64
+# ifdef TCC_ABI_MS
      DEF(TOK___bound_alloca_nr, "__bound_alloca_nr")
-#  endif
-# else
+# endif
+# ifndef TCC_TARGET_PE
      DEF(TOK_sigsetjmp, "sigsetjmp")
      DEF(TOK___sigsetjmp, "__sigsetjmp")
      DEF(TOK_siglongjmp, "siglongjmp")

@@ -5038,7 +5038,7 @@ the_end:
     bt = t & (VT_BTYPE|VT_LONG);
     if (bt == VT_LONG)
         t |= LONG_SIZE == 8 ? VT_LLONG : VT_INT;
-#if defined TCC_TARGET_PE || (defined _WIN32 && defined _MSC_VER)
+#if defined TCC_TARGET_PE || defined TCC_ABI_MS || (defined _WIN32 && defined _MSC_VER)
     if (bt == VT_LDOUBLE)
         t = (t & ~(VT_BTYPE|VT_LONG)) | (VT_DOUBLE|VT_LONG);
 #endif
@@ -5790,7 +5790,7 @@ ST_FUNC void unary(void)
         break;
 #endif
 #ifdef TCC_TARGET_X86_64
-#ifdef TCC_TARGET_PE
+#ifdef TCC_ABI_MS
     case TOK_builtin_va_start:
 	parse_builtin_params(0, "ee");
         r = vtop->r & VT_VALMASK;
