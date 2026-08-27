@@ -51,7 +51,7 @@ static void rt_exit(int code);
 /* defined when included from lib/bt-exe.c */
 #ifndef CONFIG_TCC_BACKTRACE_ONLY
 
-#ifdef __APPLE__
+#if defined(__APPLE__) && __STDC_HOSTED__
 # include <libkern/OSCacheControl.h>
 #endif
 #if !defined(_WIN32) && !defined(TCC_TARGET_NO_OS)
@@ -364,7 +364,7 @@ static void set_pages_executable(TCCState *s1, void *ptr, unsigned long length)
 # if (defined(TCC_TARGET_ARM) && \
       !defined(__FreeBSD__) && !defined(__OpenBSD__) && !defined(__NetBSD__)) || \
      defined(TCC_TARGET_ARM64)
-#  ifdef __APPLE__
+#  if defined(__APPLE__) && __STDC_HOSTED__
     sys_icache_invalidate(ptr, length);
     sys_dcache_flush(ptr, length);
 #  else
