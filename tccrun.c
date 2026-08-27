@@ -93,7 +93,7 @@ static void win64_del_function_table(void *);
 #if !defined PAGESIZE
 # if defined _SC_PAGESIZE
 #  define PAGESIZE sysconf(_SC_PAGESIZE)
-# elif defined __APPLE__
+# elif defined __APPLE__ && __STDC_HOSTED__
 #  include <libkern/OSCacheControl.h>
 #  define PAGESIZE getpagesize()
 # else
