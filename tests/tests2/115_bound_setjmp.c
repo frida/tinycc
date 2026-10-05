@@ -145,8 +145,11 @@ static void check (void)
     }
     last_value = value;
     switch (value) {
+#if !(defined(__FreeBSD__) || defined(__NetBSD__))
+    /* longjmp(jmp_buf, 0) not supported */
     case 0:
         jump (0);
+#endif
     default:
         if (value < 10)
           jump (value + 1);

@@ -136,7 +136,7 @@ extern "C" {
 
 #ifndef _CRT_ERRNO_DEFINED
 #define _CRT_ERRNO_DEFINED
-  _CRTIMP extern int *__cdecl _errno(void);
+  _CRTIMP int *__cdecl _errno(void);
 #define errno (*_errno())
   errno_t __cdecl _set_errno(int _Value);
   errno_t __cdecl _get_errno(int *_Value);
@@ -207,6 +207,21 @@ extern "C" {
 #endif
 #endif
 #endif
+
+#if defined __aarch64__
+/* something does not work using those from msvcrt.dll */
+# undef __argc
+# undef __argv
+# undef __wargv
+# undef _wenviron
+# undef _environ
+extern int __argc;
+extern char **__argv;
+extern wchar_t **__wargv;
+extern char **_environ;
+extern wchar_t **_wenviron;
+#endif
+
 #ifndef _pgmptr
 #ifdef _MSVCRT_
   extern char *_pgmptr;
@@ -376,10 +391,16 @@ extern "C" {
   _CRTIMP int __cdecl _set_error_mode(int _Mode);
   void __cdecl srand(unsigned int _Seed);
   double __cdecl strtod(const char *_Str,char **_EndPtr);
-  float __cdecl strtof(const char *nptr, char **endptr);
 #if !defined __NO_ISOCEXT  /* in libmingwex.a */
+#if __TINYC__
+  __CRT_INLINE float __cdecl strtof (const char *p, char ** e) { return strtod(p, e); }
+  __CRT_INLINE long double __cdecl strtold(const char *p, char ** e) { return strtod(p, e); }
+#else
   float __cdecl strtof (const char * __restrict__, char ** __restrict__);
   long double __cdecl strtold(const char * __restrict__, char ** __restrict__);
+#endif
+#else
+  float __cdecl strtof(const char *nptr, char **endptr);
 #endif /* __NO_ISOCEXT */
   _CRTIMP double __cdecl _strtod_l(const char *_Str,char **_EndPtr,_locale_t _Locale);
   long __cdecl strtol(const char *_Str,char **_EndPtr,int _Radix);
@@ -403,8 +424,8 @@ extern "C" {
   void *__cdecl malloc(size_t _Size);
   void *__cdecl realloc(void *_Memory,size_t _NewSize);
   _CRTIMP void *__cdecl _recalloc(void *_Memory,size_t _Count,size_t _Size);
-  //_CRTIMP void __cdecl _aligned_free(void *_Memory);
-  //_CRTIMP void *__cdecl _aligned_malloc(size_t _Size,size_t _Alignment);
+  _CRTIMP void __cdecl _aligned_free(void *_Memory);
+  _CRTIMP void *__cdecl _aligned_malloc(size_t _Size,size_t _Alignment);
   _CRTIMP void *__cdecl _aligned_offset_malloc(size_t _Size,size_t _Alignment,size_t _Offset);
   _CRTIMP void *__cdecl _aligned_realloc(void *_Memory,size_t _Size,size_t _Alignment);
   _CRTIMP void *__cdecl _aligned_recalloc(void *_Memory,size_t _Count,size_t _Size,size_t _Alignment);
@@ -544,8 +565,13 @@ extern "C" {
 
   __CRT_INLINE long long __cdecl llabs(long long _j) { return (_j >= 0 ? _j : -_j); }
 
+ #ifdef __TINYC__ /* gr */
+  #define strtoll _strtoi64
+  #define strtoull _strtoui64
+ #else
   long long  __cdecl strtoll(const char* __restrict__, char** __restrict, int);
   unsigned long long  __cdecl strtoull(const char* __restrict__, char** __restrict__, int);
+ #endif
 
   /* these are stubs for MS _i64 versions */
   long long  __cdecl atoll (const char *);

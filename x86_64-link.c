@@ -13,7 +13,7 @@
 #define R_NUM       R_X86_64_NUM
 
 #define ELF_START_ADDR 0x400000
-#define ELF_PAGE_SIZE  0x200000
+#define ELF_PAGE_SIZE  0x1000
 
 #define PCRELATIVE_DLLPLT 1
 #define RELOCATE_DLLPLT 1
@@ -22,10 +22,10 @@
 
 #include "tcc.h"
 
-#if !defined(ELF_OBJ_ONLY) || defined(TCC_TARGET_MACHO)
+#ifdef NEED_RELOC_TYPE
 /* Returns 1 for a code relocation, 0 for a data relocation. For unknown
    relocations, returns -1. */
-int code_reloc (int reloc_type)
+ST_FUNC int code_reloc (int reloc_type)
 {
     switch (reloc_type) {
         case R_X86_64_32:
@@ -47,6 +47,8 @@ int code_reloc (int reloc_type)
         case R_X86_64_TLSLD:
         case R_X86_64_DTPOFF32:
         case R_X86_64_TPOFF32:
+        case R_X86_64_DTPOFF64:
+        case R_X86_64_TPOFF64:
             return 0;
 
         case R_X86_64_PC32:
@@ -62,7 +64,7 @@ int code_reloc (int reloc_type)
 /* Returns an enumerator to describe whether and when the relocation needs a
    GOT and/or PLT entry to be created. See tcc.h for a description of the
    different values. */
-int gotplt_entry_type (int reloc_type)
+ST_FUNC int gotplt_entry_type (int reloc_type)
 {
     switch (reloc_type) {
         case R_X86_64_GLOB_DAT:
@@ -94,17 +96,21 @@ int gotplt_entry_type (int reloc_type)
         case R_X86_64_TLSGD:
         case R_X86_64_TLSLD:
         case R_X86_64_DTPOFF32:
-        case R_X86_64_TPOFF32:
+        case R_X86_64_DTPOFF64:
         case R_X86_64_REX_GOTPCRELX:
         case R_X86_64_PLT32:
         case R_X86_64_PLTOFF64:
             return ALWAYS_GOTPLT_ENTRY;
+
+        case R_X86_64_TPOFF32:
+        case R_X86_64_TPOFF64:
+            return NO_GOTPLT_ENTRY;
     }
 
     return -1;
 }
 
-#if !defined(TCC_TARGET_MACHO) || defined TCC_IS_NATIVE
+#ifdef NEED_BUILD_GOT
 ST_FUNC unsigned create_plt_entry(TCCState *s1, unsigned got_offset, struct sym_attr *attr)
 {
     Section *plt = s1->plt;
@@ -131,7 +137,7 @@ ST_FUNC unsigned create_plt_entry(TCCState *s1, unsigned got_offset, struct sym_
     /* The PLT slot refers to the relocation entry it needs via offset.
        The reloc entry is created below, so its offset is the current
        data_offset */
-    relofs = s1->got->reloc ? s1->got->reloc->data_offset : 0;
+    relofs = s1->plt->reloc ? s1->plt->reloc->data_offset : 0;
 
     /* Jump to GOT entry where ld.so initially put the address of ip + 4 */
     p = section_ptr_add(plt, 16);
@@ -140,7 +146,7 @@ ST_FUNC unsigned create_plt_entry(TCCState *s1, unsigned got_offset, struct sym_
     write32le(p + 2, got_offset);
     p[6] = 0x68; /* push $xxx */
     /* On x86-64, the relocation is referred to by _index_ */
-    write32le(p + 7, relofs / sizeof (ElfW_Rel));
+    write32le(p + 7, relofs / sizeof (ElfW_Rel) - 1);
     p[11] = 0xe9; /* jmp plt_start */
     write32le(p + 12, -(plt->data_offset));
     return plt_offset;
@@ -168,11 +174,21 @@ ST_FUNC void relocate_plt(TCCState *s1)
             p += 16;
         }
     }
+
+    if (s1->plt->reloc) {
+        ElfW_Rel *rel;
+        int x = s1->plt->sh_addr + 16 + 6;
+        p = s1->got->data;
+        for_each_elem(s1->plt->reloc, 0, rel, ElfW_Rel) {
+            write64le(p + rel->r_offset, x);
+            x += 16;
+        }
+    }
 }
 #endif
 #endif
 
-void relocate(TCCState *s1, ElfW_Rel *rel, int type, unsigned char *ptr, addr_t addr, addr_t val)
+ST_FUNC void relocate(TCCState *s1, ElfW_Rel *rel, int type, unsigned char *ptr, addr_t addr, addr_t val)
 {
     int sym_index, esym_index;
 
@@ -180,7 +196,7 @@ void relocate(TCCState *s1, ElfW_Rel *rel, int type, unsigned char *ptr, addr_t 
 
     switch (type) {
         case R_X86_64_64:
-            if (s1->output_type == TCC_OUTPUT_DLL) {
+            if (s1->output_type & TCC_OUTPUT_DYN) {
                 esym_index = get_sym_attr(s1, sym_index, 0)->dyn_index;
                 qrel->r_offset = rel->r_offset;
                 if (esym_index) {
@@ -198,7 +214,7 @@ void relocate(TCCState *s1, ElfW_Rel *rel, int type, unsigned char *ptr, addr_t 
             break;
         case R_X86_64_32:
         case R_X86_64_32S:
-            if (s1->output_type == TCC_OUTPUT_DLL) {
+            if (s1->output_type & TCC_OUTPUT_DYN) {
                 /* XXX: this logic may depend on TCC's codegen
                    now TCC uses R_X86_64_32 even for a 64bit pointer */
                 qrel->r_offset = rel->r_offset;
@@ -206,6 +222,13 @@ void relocate(TCCState *s1, ElfW_Rel *rel, int type, unsigned char *ptr, addr_t 
                 /* Use sign extension! */
                 qrel->r_addend = (int)read32le(ptr) + val;
                 qrel++;
+            }
+            if ((type == R_X86_64_32 ? val != (unsigned)val : val != (int)val)
+                /* ignore relocation check for stab section */
+                && (stab_section == NULL ||
+                    addr < stab_section->sh_addr ||
+                    addr >= (stab_section->sh_addr + stab_section->data_offset))) {
+                tcc_error_noabort("relocation 'R_X86_64_32[S]' out of range");
             }
             add32le(ptr, val);
             break;
@@ -233,11 +256,18 @@ void relocate(TCCState *s1, ElfW_Rel *rel, int type, unsigned char *ptr, addr_t 
             long long diff;
             diff = (long long)val - addr;
             if (diff < -2147483648LL || diff > 2147483647LL) {
-                tcc_error("internal error: relocation failed");
+#ifdef TCC_TARGET_PE
+              /* ignore overflow with undefined weak symbols */
+              if (((ElfW(Sym)*)symtab_section->data)[sym_index].st_shndx != SHN_UNDEF)
+#endif
+                tcc_error_noabort("relocation '%d' out of range", type);
             }
             add32le(ptr, diff);
         }
             break;
+
+        case R_X86_64_COPY:
+	    break;
 
         case R_X86_64_PLTOFF64:
             add64le(ptr, val - s1->got->sh_addr + rel->r_addend);
@@ -315,7 +345,7 @@ void relocate(TCCState *s1, ElfW_Rel *rel, int type, unsigned char *ptr, addr_t 
                     add32le(ptr + 8, x);
                 }
                 else
-                    tcc_error("unexpected R_X86_64_TLSGD pattern");
+                    tcc_error_noabort("unexpected R_X86_64_TLSGD pattern");
             }
             break;
         case R_X86_64_TLSLD:
@@ -335,20 +365,32 @@ void relocate(TCCState *s1, ElfW_Rel *rel, int type, unsigned char *ptr, addr_t 
                     rel[1].r_info = ELFW(R_INFO)(0, R_X86_64_NONE);
                 }
                 else
-                    tcc_error("unexpected R_X86_64_TLSLD pattern");
+                    tcc_error_noabort("unexpected R_X86_64_TLSLD pattern");
             }
             break;
+
         case R_X86_64_DTPOFF32:
         case R_X86_64_TPOFF32:
+        case R_X86_64_DTPOFF64:
+        case R_X86_64_TPOFF64:
             {
-                ElfW(Sym) *sym;
-                Section *sec;
                 int32_t x;
-
-                sym = &((ElfW(Sym) *)symtab_section->data)[sym_index];
-                sec = s1->sections[sym->st_shndx];
-                x = val - sec->sh_addr - sec->data_offset;
-                add32le(ptr, x);
+                if (s1->tls_end) {
+                    x = val - s1->tls_end;
+                } else {
+                    ElfW(Sym) *sym = &((ElfW(Sym) *)symtab_section->data)[sym_index];
+                    Section *sec = s1->sections[sym->st_shndx];
+                    x = val - sec->sh_addr - sec->data_offset;
+                }
+                switch (type) {
+                case R_X86_64_DTPOFF64:
+                case R_X86_64_TPOFF64:
+                    add64le(ptr, x);
+                    break;
+                default:
+                    add32le(ptr, x);
+                    break;
+                }
             }
             break;
         case R_X86_64_NONE:
@@ -358,6 +400,10 @@ void relocate(TCCState *s1, ElfW_Rel *rel, int type, unsigned char *ptr, addr_t 
             add32le(ptr, val - s1->pe_imagebase);
 #endif
             /* do nothing */
+            break;
+        default:
+            fprintf(stderr,"FIXME: handle reloc type %d at %x [%p] to %x\n",
+                type, (unsigned)addr, ptr, (unsigned)val);
             break;
     }
 }

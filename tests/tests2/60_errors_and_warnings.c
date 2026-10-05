@@ -1,9 +1,9 @@
+int printf(const char*, ...);
+
 #if defined test_56_btype_excess_1
 struct A {} int i;
-
 #elif defined test_57_btype_excess_2
 char int i;
-
 #elif defined test_58_function_redefinition
 int f(void) { return 0; }
 int f(void) { return 1; }
@@ -191,15 +191,18 @@ void * _Alignas(16) p1;
 
 #define ONE 0
  _Static_assert(ONE == 0, "don't show me this");
- _Static_assert(ONE == 1, "ONE is not 1");
+ struct x{ _Static_assert(ONE == 1, "ONE is not 1"); };
 
 #elif defined test_static_assert_2
  _Static_assert(1, "1"" is 1");
- _Static_assert(0, "0"" is 0");
+struct y {  _Static_assert(0, "0"" is 0"); };
 
 #elif defined test_static_assert_c2x
  _Static_assert(1);
- _Static_assert(0);
+struct z {  _Static_assert(0); }
+
+#elif defined test_static_assert_empty_string
+ _Static_assert(0,"");
 
 #elif defined test_void_array
  void t[3];
@@ -250,7 +253,7 @@ int main () {
     hello(123);
     return 0;
 }
-int printf(const char*, ...);
+
 #if defined test_func_3
 static int hello(int a)
 #elif defined test_func_5
@@ -269,7 +272,7 @@ int hello(int a)
 int xxx[];
 #endif
 int bar();
-int printf(const char*, ...);
+
 int main ()
 {
 #if !defined test_var_3
@@ -330,7 +333,7 @@ int main()
 x
 
 #elif defined test_stray_backslash2
-int printf(const char*, ...);
+
 int main()
 {
 #define _S(x) #x
@@ -354,6 +357,12 @@ struct c1 c1 = { 1, { 2, 3, 4 } };
 struct c2 { int c; struct c1 c1; };
 struct c2 c2 = { 1, { 2, { 3, 4, 5 }}};
 
+#elif defined test_var_array3
+/* similar to test_var_array2 but with string initializers */
+struct A { int a; char b[]; };
+struct A a = { 1, "1" };
+struct B { struct A a; };
+struct B b = { { 1, "1" } };
 /******************************************************************/
 #elif defined test_default_int_type
 n; // warn
@@ -366,4 +375,328 @@ n[sizeof({3;})]; // crashed in block() due to missing local scope
 f(){"12"3;} // second const token killed the value of the first
 
 /******************************************************************/
+#elif defined test_duplicate_member
+struct S {
+  int a, a;
+};
+#elif defined test_duplicate_member_anon
+struct S1 {
+  int b;
+  struct {
+    int b;
+  } c;
+};
+struct S2 {
+  int d;
+  struct {
+    int d;
+  };
+};
+
+/******************************************************************/
+#elif defined test_conflicting_array_definition
+extern int array[2];
+int array[] = { 1, 2, 3 };
+
+#elif defined test_incompatible_local_redef
+void foo (void)
+{
+  typedef int localfunctype (int);
+  extern localfunctype func2;
+  typedef void localfunctype (int, int);
+}
+
+#elif defined test_cast_from_void
+void v() {}
+int f() { return v(); }
+
+#elif defined test_switch_W1 || defined test_switch_W2 \
+   || defined test_switch_W3 || defined test_switch_W4
+#if defined test_switch_W1
+#pragma comment(option, "-Wall")
+#elif defined test_switch_W2
+#pragma comment(option, "-Wunsupported -Wno-implicit-function-declaration -Wstuff")
+#elif defined test_switch_W3
+#pragma comment(option, "-Wwrite-strings -Werror=discarded-qualifiers")
+#elif defined test_switch_W4
+#pragma comment(option, "-Wunsupported -Wno-error=implicit-function-declaration -Werror")
+#endif
+void func(void)
+{
+    char *ccp = "123";
+    fink();
+}
+__attribute__((stuff)) int fink() {return 0;}
+
+#elif defined test_invalid_funcparam_1
+void func(int a, int b, int a);
+
+#elif defined test_invalid_funcparam_2
+void func(int a, int if);
+
+#elif defined test_array_funcparam
+int amain(int argc, char *argv[static argc + 1])
+{
+    int i;
+
+    for (i = 0; i < argc; ++i)
+        printf("arg[%d] = \"%s\"\n", i, argv[i]);
+    return 0;
+}
+int main()
+{
+    return amain(2, (char *[]){ "X", "Y", 0 });
+}
+
+#elif defined test_return_from_statement_expr
+int f() { ({ return 78; }); }
+int main() { return f(); }
+
+/******************************************************************/
+
+#elif defined test_illegal_unicode
+int main() {
+    char *str = "\Uffffffff";
+}
+
+#elif defined test_error_string
+#error \123\\
+456
+
+#elif defined test_error_incomplete_type
+struct A;
+void f(struct A *);
+
+int main()
+{
+    f(&(struct A){});
+}
+
+struct A {
+    int x;
+};
+
+#elif defined test_pp_error_1
+# if //no expression
+# endif
+#elif defined test_pp_error_2
+# if X(1,2) //undefined function macro
+# endif
+
+#elif defined test_pointer_plus_double
+
+int *invalid_operation(int *p, double d)
+{
+    return p + d;
+}
+
+#elif defined test_duplicate_case
+
+int main()
+{
+    unsigned int x;
+    switch (x) {
+        case -1 ... 0: /* empty case range with unsigned */
+        case 3:
+        case 1:
+        case 2:
+        case 3: /* show this line number in error */
+        case 4:
+        case 5:
+    }
+}
+#elif defined test_normal_funcargs || defined test_reverse_funcargs
+
+#ifdef test_reverse_funcargs
+# pragma comment(option, "-freverse-funcargs")
+#endif
+
+int main()
+{
+    printf(" %d %d %d\n", printf("1"), printf("22"), printf("333"));
+}
+
+#elif defined test_scope_1 \
+   || defined test_scope_2 \
+   || defined test_scope_3
+
+struct xxx {int x[4];};
+
+/* 'ee' not defined outside of function, 'i' not redefined */
+int bar(enum ee { a = 12, b = 34 } i, int(*f)(int i))
+{
+    printf("bar %d %d %d\n", i, a, b);
+    return 0;
+}
+/* 'xxx' not defined outside of function */
+int foo(struct xxx {int x[3];}*p)
+{
+    printf("foo %d", sizeof *p);
+    return p->x[3];
+}
+#ifdef test_scope_2
+/* incompatible redefinition */
+int foo(struct xxx {int x[2];}*p);
+#endif
+#ifndef test_scope_3
+enum ee { a = 1, b };
+#endif
+
+struct xxx x = { 11,22,33,44 };
+int main(int argc, char **argv)
+{
+    printf(" %d %d\n", foo(&x), sizeof (struct xxx));
+    enum ee e = b;
+    bar(13 + e, 0);
+
+}
+
+#elif defined test_const_array_member_addr_ok
+
+typedef int int_array[1];
+typedef struct { int_array arr; } my_struct;
+
+int_array const *get_array(const my_struct *s)
+{
+    return &(s->arr);
+}
+
+#elif defined test_const_array_member_decay_ok
+
+typedef int int_array[1];
+typedef struct { int_array arr; } my_struct;
+
+const int *good_decay(const my_struct *s)
+{
+    return s->arr;
+}
+
+#elif defined test_const_array_member_addr_bad
+
+typedef int int_array[1];
+typedef struct { int_array arr; } my_struct;
+
+int_array *bad_array_addr(const my_struct *s)
+{
+    return &(s->arr);
+}
+
+#elif defined test_const_array_member_decay_bad
+
+typedef int int_array[1];
+typedef struct { int_array arr; } my_struct;
+
+int *bad_decay(const my_struct *s)
+{
+    return s->arr;
+}
+
+#elif defined test_const_array_member_write_bad
+
+typedef int int_array[1];
+typedef struct { int_array arr; } my_struct;
+
+void bad_write(const my_struct *s)
+{
+    s->arr[0] = 1;
+}
+
+#elif defined test_const_struct_array_member_write_bad
+
+typedef struct { int x; } inner;
+typedef struct { inner arr[1]; } outer;
+
+void bad_inner_write(const outer *s)
+{
+    s->arr[0].x = 1;
+}
+
+#elif defined test_volatile_array_member_addr_ok
+
+typedef int int_array[1];
+typedef struct { int_array arr; } my_struct;
+
+int_array volatile *get_volatile_array(volatile my_struct *s)
+{
+    return &(s->arr);
+}
+
+#elif defined test_volatile_array_member_decay_ok
+
+typedef int int_array[1];
+typedef struct { int_array arr; } my_struct;
+
+volatile int *good_volatile_decay(volatile my_struct *s)
+{
+    return s->arr;
+}
+
+#elif defined test_volatile_array_member_addr_bad
+
+typedef int int_array[1];
+typedef struct { int_array arr; } my_struct;
+
+int_array *bad_volatile_array_addr(volatile my_struct *s)
+{
+    return &(s->arr);
+}
+
+#elif defined test_volatile_array_member_decay_bad
+
+typedef int int_array[1];
+typedef struct { int_array arr; } my_struct;
+
+int *bad_volatile_decay(volatile my_struct *s)
+{
+    return s->arr;
+}
+
+#elif defined test_volatile_array_member_write_ok
+
+typedef int int_array[1];
+typedef struct { int_array arr; } my_struct;
+
+void good_volatile_write(volatile my_struct *s)
+{
+    s->arr[0] = 1;
+}
+
+#elif defined test_conditional_array_qualifiers
+
+typedef int Array2[2];
+typedef int Array2x3[2][3];
+
+Array2 *p;
+const Array2 *cp;
+const Array2x3 *cap;
+volatile Array2x3 *vap;
+
+void test(void)
+{
+    (1 ? p : cp)[0][0] = 1;
+    (1 ? cp : p)[0][0] = 2;
+    (1 ? cap : vap)[0][0][0] = 3;
+    (1 ? vap : cap)[0][0][0] = 4;
+}
+
+#elif defined test_restrict_scalar
+
+restrict int object;
+
+#elif defined test_restrict_function_pointer
+
+int (*restrict function_pointer)(void);
+
+#elif defined test_discarded_restrict
+
+typedef int *restrict restricted_pointer;
+
+restricted_pointer *source;
+int **destination;
+
+void test(void)
+{
+    destination = source;
+}
+
 #endif

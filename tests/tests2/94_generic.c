@@ -21,12 +21,20 @@ int b_f()
 }
 
 typedef int (*fptr)(int);
+typedef void (*vfptr)(int);
 int foo(int i)
 {
   return i;
 }
+void void_foo(int i) {}
 
 typedef int int_type1;
+
+typedef int T[4];
+int f(T t)
+{
+	return _Generic(t, __typeof__( ((void)0, (T){0}) ) : 1 );
+}
 
 #define gen_sw(a) _Generic(a, const char *: 1, default: 8, int: 123);
 
@@ -38,6 +46,7 @@ int main()
 	const int * const ptr;
 	const char *ti;
 	int_type1 i2;
+	T t;
 
 	i = _Generic(a, int: a_f, const int: b_f)();
 	printf("%d\n", i);
@@ -66,7 +75,9 @@ int main()
 				long long: "long long"));
 	i = _Generic(l, long: 1, int: 2);
 	printf("%d\n", i);
-	i = _Generic(foo, fptr: 3, int: 4);
+	i = _Generic(foo, fptr: 3, int: 4, vfptr: 5);
+	printf("%d\n", i);
+	i = _Generic(void_foo, fptr: 3, int: 4, vfptr: 5);
 	printf("%d\n", i);
 
 	(void)_Generic((int(*)[2]){0}, int(*)[2]:0, int(*)[4]:0); //shouldn't match twice
@@ -88,6 +99,9 @@ int main()
 
 	//void ptrs get chosen preferentially; qualifs still combine
 	_Generic( 0?(int volatile*)0: (void const*)1, void volatile const*: (void)0);
+        //but this is no null-ptr constant, so fallback to void-choice
+        i = 0;
+        _Generic( 1?(void*)(i*0LL):&i, void*:0);
 	//like gcc but not clang, don't treat (void* const as the null-ptr constant)
 	_Generic( 0?(int volatile*)0: (void const*)0, void volatile const*: (void)0);
 
@@ -110,6 +124,8 @@ int main()
 	  (void)(sizeof(struct { int x:_Generic( 0?(int (*)[4])0 : ar, int (*)[4]:+1, int (*)[5]:(void)0); }));
 	  (void)(sizeof(struct { int x:_Generic( 0?(int (*)[5])0 : ar, int (*)[5]:+1, int (*)[4]:(void)0); }));
 	}
+
+	printf ("%d\n", f(t));
 
 	return 0;
 }

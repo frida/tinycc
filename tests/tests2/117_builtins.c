@@ -11,7 +11,7 @@ main (void)
   char tmp[100];
   int r = 0;
 
-#if defined __BOUNDS_CHECKING_ON || defined BC_ON
+#if defined __TCC_BCHECK__
   printf("BOUNDS ON:\n");
 #else
   printf("BOUNDS OFF:\n");
@@ -60,12 +60,20 @@ main (void)
   r = (__builtin_memcmp (p, str, sizeof(str)));
   printf(" 11:%d", !r);
 
-  r = (__builtin_strchr(p, 'z') != &p[25]);
+  tmp[0] = '\0';
+  p = __builtin_strncat(tmp, str, __builtin_strlen(str));
+  r = (__builtin_memcmp (p, str, sizeof(str)));
   printf(" 12:%d", !r);
+
+  r = (__builtin_strchr(p, 'z') != &p[25]);
+  printf(" 13:%d", !r);
+
+  r = (__builtin_strrchr(p, 'z') != &p[25]);
+  printf(" 14:%d", !r);
 
   p = __builtin_strdup (str);
   r = (__builtin_memcmp (p, str, sizeof(str)));
-  printf(" 13:%d", !r);
+  printf(" 15:%d", !r);
   __builtin_free(p);
 
   p = __builtin_malloc (100);

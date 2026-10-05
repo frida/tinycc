@@ -38,8 +38,9 @@
 #define LDBL_MAX_EXP 16384
 #define LDBL_MAX 1.18973149535723176502e+4932L
 #define LDBL_MAX_10_EXP 4932
+#define DECIMAL_DIG 21
 
-#elif defined __aarch64__ || defined _M_ARM64 || defined __riscv
+#elif defined __aarch64__ || defined __riscv
 /*
  * Use values from:
  * gcc -dM -E -xc /dev/null | grep LDBL | sed -e "s/__//g"
@@ -52,7 +53,8 @@
 #define LDBL_MIN_10_EXP (-4931)
 #define LDBL_MAX_EXP 16384
 #define LDBL_MAX 1.18973149535723176508575932662800702e+4932L
-#define LDBL_MAX_EXP 16384
+#define LDBL_MAX_10_EXP 4932
+#define DECIMAL_DIG 36
 
 #else
 
@@ -66,6 +68,7 @@
 #define LDBL_MAX_EXP 1024
 #define LDBL_MAX 1.7976931348623157e+308L
 #define LDBL_MAX_10_EXP 308
+#define DECIMAL_DIG 17
 
 #endif
 

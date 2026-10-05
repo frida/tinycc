@@ -33,8 +33,10 @@
 #define RC_INT     0x0001 /* generic integer register */
 #define RC_FLOAT   0x0002 /* generic float register */
 #define RC_RAX     0x0004
-#define RC_RCX     0x0008
-#define RC_RDX     0x0010
+#define RC_RDX     0x0008
+#define RC_RCX     0x0010
+#define RC_RSI     0x0020
+#define RC_RDI     0x0040
 #define RC_ST0     0x0080 /* only for long double */
 #define RC_R8      0x0100
 #define RC_R9      0x0200
@@ -105,12 +107,22 @@ enum {
 /* define if return values need to be extended explicitely
    at caller side (for interfacing with non-TCC compilers) */
 #define PROMOTE_RET
+
+#define TCC_TARGET_NATIVE_STRUCT_COPY
+ST_FUNC void gen_struct_copy(int size);
+
 /******************************************************/
 #else /* ! TARGET_DEFS_ONLY */
 /******************************************************/
 #define USING_GLOBALS
 #include "tcc.h"
 #include <assert.h>
+
+ST_DATA const char * const target_machine_defs =
+    "__x86_64__\0"
+    "__x86_64\0"
+    "__amd64__\0"
+    ;
 
 ST_DATA const int reg_classes[NB_REGS] = {
     /* eax */ RC_INT | RC_RAX,
@@ -119,8 +131,8 @@ ST_DATA const int reg_classes[NB_REGS] = {
     0,
     0,
     0,
-    0,
-    0,
+    RC_RSI,
+    RC_RDI,
     RC_R8,
     RC_R9,
     RC_R10,
@@ -152,7 +164,7 @@ static unsigned long func_bound_ind;
 ST_DATA int func_bound_add_epilog;
 #endif
 
-#ifdef TCC_ABI_MS
+#ifdef TCC_TARGET_PE
 static int func_scratch, func_alloca;
 #endif
 
@@ -209,8 +221,11 @@ static void orex(int ll, int r, int r2, int b)
         r = 0;
     if ((r2 & VT_VALMASK) >= VT_CONST)
         r2 = 0;
-    if (ll || REX_BASE(r) || REX_BASE(r2))
+    if (ll || REX_BASE(r) || REX_BASE(r2)) {
+        if ((b & 0xff) == 0x66) /* output prefix before rex byte */
+            o(0x66), b >>= 8;
         o(0x40 | REX_BASE(r) | (REX_BASE(r2) << 2) | (ll << 3));
+    }
     o(b);
 }
 
@@ -255,14 +270,6 @@ ST_FUNC void gen_addr32(int r, Sym *sym, int c)
 }
 
 /* output constant with relocation if 'r & VT_SYM' is true */
-ST_FUNC void gen_addr64(int r, Sym *sym, int64_t c)
-{
-    if (r & VT_SYM)
-        greloca(cur_text_section, sym, ind, R_X86_64_64, c), c=0;
-    gen_le64(c);
-}
-
-/* output constant with relocation if 'r & VT_SYM' is true */
 ST_FUNC void gen_addrpc32(int r, Sym *sym, int c)
 {
     if (r & VT_SYM)
@@ -291,9 +298,34 @@ static void gen_gotpcrel(int r, Sym *sym, int c)
     }
 }
 
-static void gen_modrm_impl(int op_reg, int r, Sym *sym, int c, int is_got)
+/* generate a modrm reference. 'op_reg' contains the additional 3
+   opcode rsp. second register bits */
+static void gen_modrm_impl(int opcode, int ll, int op_reg_0, int r, Sym *sym, int c)
 {
-    op_reg = REG_VALUE(op_reg) << 3;
+    int op_reg = REG_VALUE(op_reg_0) << 3;
+
+    if ((r & VT_SYM) && (sym->type.t & VT_TLS)) {
+#ifdef TCC_TARGET_PE
+        Sym *s2 = external_global_sym(TOK___tls_index, &int_type);
+        r = get_reg(RC_INT);
+        gen_modrm_impl(0x8B, 0,  r, VT_SYM|VT_CONST, s2, 0);
+        o(0x03e0c148 | r << 16); /* shl 2,r */
+        o(0x4865), oad(0x250403 | r << 11, 11*PTR_SIZE); /* add gs:0x58,r */
+        gen_modrm_impl(0x8B, 1, r, r | VT_LVAL, 0, 0); /* mov (r),r */
+        orex(ll, r, op_reg_0, opcode), oad(0x80 | op_reg | r, 0);
+        greloca(cur_text_section, sym, ind - 4, R_X86_64_TPOFF32, c);
+#else
+        o(0x64); /* fs segment prefix */
+        orex(ll, r, op_reg_0, opcode);
+	o(0x04 | op_reg); /* [sib] | destreg */
+	oad(0x25, 0);     /* disp32 (relocated) */
+	greloca(cur_text_section, sym, ind - 4, R_X86_64_TPOFF32, c);
+#endif
+        return;
+    }
+
+    orex(ll, r, op_reg_0, opcode);
+
     if ((r & VT_VALMASK) == VT_CONST) {
         /* constant memory reference */
 	if (!(r & VT_SYM)) {
@@ -302,7 +334,7 @@ static void gen_modrm_impl(int op_reg, int r, Sym *sym, int c, int is_got)
 	    oad(0x25, c);     /* disp32 */
 	} else {
 	    o(0x05 | op_reg); /* (%rip)+disp32 | destreg */
-	    if (is_got) {
+	    if (op_reg_0 & TREG_MEM) {
 		gen_gotpcrel(r, sym, c);
 	    } else {
 		gen_addrpc32(r, sym, c);
@@ -310,42 +342,33 @@ static void gen_modrm_impl(int op_reg, int r, Sym *sym, int c, int is_got)
 	}
     } else if ((r & VT_VALMASK) == VT_LOCAL) {
         /* currently, we use only ebp as base */
-        if (c == (char)c) {
+        if (c == (signed char)c) {
             /* short reference */
             o(0x45 | op_reg);
             g(c);
         } else {
             oad(0x85 | op_reg, c);
         }
-    } else if ((r & VT_VALMASK) >= TREG_MEM) {
-        if (c) {
-            g(0x80 | op_reg | REG_VALUE(r));
-            gen_le32(c);
-        } else {
-            g(0x00 | op_reg | REG_VALUE(r));
-        }
-    } else {
+    /* 'c' (mostly from vtop->c.i) is not valid unless when TREG_MEM is set */
+    } else if ((r & TREG_MEM) && c) {
+        g(0x80 | op_reg | REG_VALUE(r));
+        gen_le32(c);
+    } else if (r & VT_LVAL) {
         g(0x00 | op_reg | REG_VALUE(r));
+    } else {
+        g(0xc0 | op_reg | REG_VALUE(r));
     }
 }
 
-/* generate a modrm reference. 'op_reg' contains the additional 3
-   opcode bits */
-static void gen_modrm(int op_reg, int r, Sym *sym, int c)
-{
-    gen_modrm_impl(op_reg, r, sym, c, 0);
-}
-
-/* generate a modrm reference. 'op_reg' contains the additional 3
-   opcode bits */
 static void gen_modrm64(int opcode, int op_reg, int r, Sym *sym, int c)
 {
-    int is_got;
-    is_got = (op_reg & TREG_MEM) && !(sym->type.t & VT_STATIC);
-    orex(1, r, op_reg, opcode);
-    gen_modrm_impl(op_reg, r, sym, c, is_got);
+    gen_modrm_impl(opcode, 1, op_reg, r, sym, c);
 }
 
+static void gen_modrm32(int opcode, int op_reg, int r, Sym *sym, int c)
+{
+    gen_modrm_impl(opcode, 0, op_reg, r, sym, c);
+}
 
 /* load 'r' from value 'sv' */
 void load(int r, SValue *sv)
@@ -353,23 +376,17 @@ void load(int r, SValue *sv)
     int v, t, ft, fc, fr;
     SValue v1;
 
-#ifdef TCC_TARGET_PE
-    SValue v2;
-    sv = pe_getimport(sv, &v2);
-#endif
-
     fr = sv->r;
-    ft = sv->type.t & ~VT_DEFSIGN;
+    ft = sv->type.t & ~(VT_DEFSIGN|VT_QUAL);
     fc = sv->c.i;
+
     if (fc != sv->c.i && (fr & VT_SYM))
       tcc_error("64 bit addend in load");
 
-    ft &= ~(VT_VOLATILE | VT_CONSTANT);
-
 #ifndef TCC_TARGET_PE
     /* we use indirect access via got */
-    if ((fr & VT_VALMASK) == VT_CONST && (fr & VT_SYM) &&
-        (fr & VT_LVAL) && !(sv->sym->type.t & VT_STATIC)) {
+    if ((fr & (VT_VALMASK|VT_SYM|VT_LVAL)) == (VT_CONST|VT_SYM|VT_LVAL)
+        && !(sv->sym->type.t & (VT_STATIC|VT_TLS))) {
         /* use the result register as a temporal register */
         int tr = r | TREG_MEM;
         if (is_float(ft)) {
@@ -390,10 +407,12 @@ void load(int r, SValue *sv)
             v1.type.t = VT_PTR;
             v1.r = VT_LOCAL | VT_LVAL;
             v1.c.i = fc;
+	    v1.sym = NULL;
             fr = r;
             if (!(reg_classes[fr] & (RC_INT|RC_R11)))
                 fr = get_reg(RC_INT);
             load(fr, &v1);
+            fr |= VT_LVAL;
         }
 	if (fc != sv->c.i) {
 	    /* If the addends doesn't fit into a 32bit signed
@@ -402,6 +421,7 @@ void load(int r, SValue *sv)
 	    v1.type.t = VT_LLONG;
 	    v1.r = VT_CONST;
 	    v1.c.i = sv->c.i;
+	    v1.sym = NULL;
 	    fr = r;
 	    if (!(reg_classes[fr] & (RC_INT|RC_R11)))
 	        fr = get_reg(RC_INT);
@@ -453,21 +473,20 @@ void load(int r, SValue *sv)
             ll = is64_type(ft);
             b = 0x8b;
         }
-        if (ll) {
-            gen_modrm64(b, r, fr, sv->sym, fc);
-        } else {
-            orex(ll, fr, r, b);
-            gen_modrm(r, fr, sv->sym, fc);
-        }
+        gen_modrm_impl(b, ll, r, fr, sv->sym, fc);
     } else {
         if (v == VT_CONST) {
             if (fr & VT_SYM) {
 #ifdef TCC_TARGET_PE
-                orex(1,0,r,0x8d);
-                o(0x05 + REG_VALUE(r) * 8); /* lea xx(%rip), r */
-                gen_addrpc32(fr, sv->sym, fc);
+                gen_modrm64(0x8d, r, fr, sv->sym, fc);
 #else
-                if (sv->sym->type.t & VT_STATIC) {
+                if (sv->sym->type.t & VT_TLS) {
+                    /* mov fs:0, r */
+                    o(0x64), gen_modrm64(0x8b, r, VT_CONST, NULL, 0);
+                    /* add $tpoff,r */
+                    orex(1,0,r,0x81), oad(0xC0 | REG_VALUE(r), 0);
+                    greloca(cur_text_section, sv->sym, ind - 4, R_X86_64_TPOFF32, fc);
+                } else if (sv->sym->type.t & VT_STATIC) {
                     orex(1,0,r,0x8d);
                     o(0x05 + REG_VALUE(r) * 8); /* lea xx(%rip), r */
                     gen_addrpc32(fr, sv->sym, fc);
@@ -478,15 +497,22 @@ void load(int r, SValue *sv)
                 }
 #endif
             } else if (is64_type(ft)) {
-                orex(1,r,0, 0xb8 + REG_VALUE(r)); /* mov $xx, r */
-                gen_le64(sv->c.i);
+                if (sv->c.i >> 32) {
+                    orex(1,r,0, 0xb8 + REG_VALUE(r)); /* movabs $xx, r */
+                    gen_le64(sv->c.i);
+                } else if (sv->c.i > 0) {
+                    orex(0,r,0, 0xb8 + REG_VALUE(r)); /* mov $xx, r */
+                    gen_le32(sv->c.i);
+                } else {
+                    orex(0, r, r, 0x31); /* xor r, r */
+                    o(0xc0 + REG_VALUE(r) * 9);
+                }
             } else {
                 orex(0,r,0, 0xb8 + REG_VALUE(r)); /* mov $xx, r */
                 gen_le32(fc);
             }
         } else if (v == VT_LOCAL) {
-            orex(1,0,r,0x8d); /* lea xxx(%ebp), r */
-            gen_modrm(r, VT_LOCAL, sv->sym, fc);
+            gen_modrm64(0x8d, r, VT_LOCAL, sv->sym, fc);
         } else if (v == VT_CMP) {
 	    if (fc & 0x100)
 	      {
@@ -550,80 +576,48 @@ void load(int r, SValue *sv)
 /* store register 'r' in lvalue 'v' */
 void store(int r, SValue *v)
 {
-    int fr, bt, ft, fc;
-    int op64 = 0;
+    int fr, bt, fc;
     /* store the REX prefix in this variable when PIC is enabled */
-    int pic = 0;
+    int opc = 0, ll = 0;
 
-#ifdef TCC_TARGET_PE
-    SValue v2;
-    v = pe_getimport(v, &v2);
-#endif
-
-    fr = v->r & VT_VALMASK;
-    ft = v->type.t;
+    fr = v->r;
     fc = v->c.i;
     if (fc != v->c.i && (fr & VT_SYM))
-      tcc_error("64 bit addend in store");
-    ft &= ~(VT_VOLATILE | VT_CONSTANT);
-    bt = ft & VT_BTYPE;
+        tcc_error("64 bit addend in store");
+    bt = v->type.t & VT_BTYPE;
 
 #ifndef TCC_TARGET_PE
     /* we need to access the variable via got */
-    if (fr == VT_CONST && (v->r & VT_SYM)) {
+    if ((fr & (VT_VALMASK|VT_SYM)) == (VT_CONST|VT_SYM)
+        && !(v->sym->type.t & (VT_STATIC|VT_TLS))) {
         /* mov xx(%rip), %r11 */
         o(0x1d8b4c);
         gen_gotpcrel(TREG_R11, v->sym, v->c.i);
-        pic = is64_type(bt) ? 0x49 : 0x41;
+        fr = TREG_R11 | VT_LVAL;
     }
 #endif
 
     /* XXX: incorrect if float reg to reg */
     if (bt == VT_FLOAT) {
-        o(0x66);
-        o(pic);
-        o(0x7e0f); /* movd */
+        opc = 0x7e0f66;
         r = REG_VALUE(r);
     } else if (bt == VT_DOUBLE) {
-        o(0x66);
-        o(pic);
-        o(0xd60f); /* movq */
+        opc = 0xd60f66;
         r = REG_VALUE(r);
     } else if (bt == VT_LDOUBLE) {
         o(0xc0d9); /* fld %st(0) */
-        o(pic);
-        o(0xdb); /* fstpt */
+        opc = 0xdb;
         r = 7;
+    } else if (bt == VT_BYTE || bt == VT_BOOL) {
+        opc = 0x88;
     } else {
+        opc = 0x89;
         if (bt == VT_SHORT)
-            o(0x66);
-        o(pic);
-        if (bt == VT_BYTE || bt == VT_BOOL)
-            orex(0, 0, r, 0x88);
+            opc = 0x8966;
         else if (is64_type(bt))
-            op64 = 0x89;
-        else
-            orex(0, 0, r, 0x89);
+            ll = 1;
     }
-    if (pic) {
-        /* xxx r, (%r11) where xxx is mov, movq, fld, or etc */
-        if (op64)
-            o(op64);
-        o(3 + (r << 3));
-    } else if (op64) {
-        if (fr == VT_CONST || fr == VT_LOCAL || (v->r & VT_LVAL)) {
-            gen_modrm64(op64, r, v->r, v->sym, fc);
-        } else if (fr != r) {
-            orex(1, fr, r, op64);
-            o(0xc0 + fr + r * 8); /* mov r, fr */
-        }
-    } else {
-        if (fr == VT_CONST || fr == VT_LOCAL || (v->r & VT_LVAL)) {
-            gen_modrm(r, v->r, v->sym, fc);
-        } else if (fr != r) {
-            o(0xc0 + fr + r * 8); /* mov r, fr */
-        }
-    }
+    gen_modrm_impl(opc, ll, r, fr, v->sym, fc);
 }
 
 /* 'is_jmp' is '1' if it is a jump */
@@ -633,11 +627,7 @@ static void gcall_or_jmp(int is_jmp)
     if ((vtop->r & (VT_VALMASK | VT_LVAL)) == VT_CONST &&
 	((vtop->r & VT_SYM) && (vtop->c.i-4) == (int)(vtop->c.i-4))) {
         /* constant symbolic case -> simple relocation */
-#ifdef TCC_TARGET_PE
-        greloca(cur_text_section, vtop->sym, ind + 1, R_X86_64_PC32, (int)(vtop->c.i-4));
-#else
         greloca(cur_text_section, vtop->sym, ind + 1, R_X86_64_PLT32, (int)(vtop->c.i-4));
-#endif
         oad(0xe8 + is_jmp, 0); /* call/jmp im */
     } else {
         /* otherwise, indirect call */
@@ -653,16 +643,12 @@ static void gcall_or_jmp(int is_jmp)
 
 static void gen_bounds_call(int v)
 {
-    Sym *sym = external_global_sym(v, &func_old_type);
+    Sym *sym = external_helper_sym(v);
     oad(0xe8, 0);
-#ifdef TCC_TARGET_PE
-    greloca(cur_text_section, sym, ind-4, R_X86_64_PC32, -4);
-#else
     greloca(cur_text_section, sym, ind-4, R_X86_64_PLT32, -4);
-#endif
 }
 
-#ifdef TCC_ABI_MS
+#ifdef TCC_TARGET_PE
 # define TREG_FASTCALL_1 TREG_RCX
 #else
 # define TREG_FASTCALL_1 TREG_RDI
@@ -674,8 +660,8 @@ static void gen_bounds_prolog(void)
     func_bound_offset = lbounds_section->data_offset;
     func_bound_ind = ind;
     func_bound_add_epilog = 0;
-    o(0xb848 + TREG_FASTCALL_1 * 0x100); /*lbound section pointer */
-    gen_le64 (0);
+    o(0x0d8d48 + ((TREG_FASTCALL_1 == TREG_RDI) * 0x300000)); /*lbound section pointer */
+    gen_le32 (0);
     oad(0xb8, 0); /* call to function */
 }
 
@@ -694,29 +680,37 @@ static void gen_bounds_epilog(void)
     *bounds_ptr = 0;
 
     sym_data = get_sym_ref(&char_pointer_type, lbounds_section, 
-                           func_bound_offset, lbounds_section->data_offset);
+                           func_bound_offset, PTR_SIZE);
 
     /* generate bound local allocation */
     if (offset_modified) {
         saved_ind = ind;
         ind = func_bound_ind;
-        greloca(cur_text_section, sym_data, ind + 2, R_X86_64_64, 0);
-        ind = ind + 10;
+        greloca(cur_text_section, sym_data, ind + 3, R_X86_64_PC32, -4);
+        ind = ind + 7;
         gen_bounds_call(TOK___bound_local_new);
         ind = saved_ind;
     }
 
     /* generate bound check local freeing */
     o(0x5250); /* save returned value, if any */
-    greloca(cur_text_section, sym_data, ind + 2, R_X86_64_64, 0);
-    o(0xb848 + TREG_FASTCALL_1 * 0x100); /* mov xxx, %rcx/di */
-    gen_le64 (0);
+    o(0x20ec8348); /* sub $32,%rsp */
+    o(0x290f);     /* movaps %xmm0,0x10(%rsp) */
+    o(0x102444);
+    o(0x240c290f); /* movaps %xmm1,(%rsp) */
+    greloca(cur_text_section, sym_data, ind + 3, R_X86_64_PC32, -4);
+    o(0x0d8d48 + ((TREG_FASTCALL_1 == TREG_RDI) * 0x300000)); /* lea xxx(%rip), %rcx/rdi */
+    gen_le32 (0);
     gen_bounds_call(TOK___bound_local_delete);
+    o(0x280f);     /* movaps 0x10(%rsp),%xmm0 */
+    o(0x102444);
+    o(0x240c280f); /* movaps (%rsp),%xmm1 */
+    o(0x20c48348); /* add $32,%rsp */
     o(0x585a); /* restore returned value, if any */
 }
 #endif
 
-#ifdef TCC_ABI_MS
+#ifdef TCC_TARGET_PE
 
 #define REGN 4
 static const uint8_t arg_regs[REGN] = {
@@ -730,7 +724,7 @@ static int arg_prepare_reg(int idx) {
       /* idx=0: r10, idx=1: r11 */
       return idx + 10;
   else
-      return arg_regs[idx];
+      return idx >= 0 && idx < REGN ? arg_regs[idx] : 0;
 }
 
 /* Generate function call. The function address is pushed first, then
@@ -740,7 +734,7 @@ static int arg_prepare_reg(int idx) {
 static void gen_offs_sp(int b, int r, int d)
 {
     orex(1,0,r & 0x100 ? 0 : r, b);
-    if (d == (char)d) {
+    if (d == (signed char)d) {
         o(0x2444 | (REG_VALUE(r) << 3));
         g(d);
     } else {
@@ -798,6 +792,8 @@ void gfunc_call(int nb_args)
     if (tcc_state->do_bounds_check)
         gbound_args(nb_args);
 #endif
+
+    save_regs(nb_args);
 
     args_size = (nb_args < REGN ? REGN : nb_args) * PTR_SIZE;
     arg = nb_args;
@@ -896,7 +892,7 @@ void gfunc_call(int nb_args)
         }
         vtop--;
     }
-    save_regs(0);
+
     /* Copy R10 and R11 into RCX and RDX, respectively */
     if (nb_args > 0) {
         o(0xd1894c); /* mov %r10, %rcx */
@@ -917,7 +913,6 @@ void gfunc_call(int nb_args)
     }
     vtop--;
 }
-
 
 #define FUNC_PROLOG_SIZE 11
 
@@ -960,22 +955,20 @@ void gfunc_prolog(Sym *func_sym)
             if (reg_param_index < REGN) {
                 gen_modrm64(0x89, arg_regs[reg_param_index], VT_LOCAL, NULL, addr);
             }
-            sym_push(sym->v & ~SYM_FIELD, type,
-                     VT_LLOCAL | VT_LVAL, addr);
+            gfunc_set_param(sym, addr, 1);
         } else {
             if (reg_param_index < REGN) {
                 /* save arguments passed by register */
                 if ((bt == VT_FLOAT) || (bt == VT_DOUBLE)) {
 		    if (tcc_state->nosse)
 		      tcc_error("SSE disabled");
-                    o(0xd60f66); /* movq */
-                    gen_modrm(reg_param_index, VT_LOCAL, NULL, addr);
+                    /* movq */
+                    gen_modrm32(0xd60f66, reg_param_index, VT_LOCAL, NULL, addr);
                 } else {
                     gen_modrm64(0x89, arg_regs[reg_param_index], VT_LOCAL, NULL, addr);
                 }
             }
-            sym_push(sym->v & ~SYM_FIELD, type,
-		     VT_LOCAL | VT_LVAL, addr);
+            gfunc_set_param(sym, addr, 0);
         }
         addr += 8;
         reg_param_index++;
@@ -997,7 +990,7 @@ void gfunc_prolog(Sym *func_sym)
 /* generate function epilog */
 void gfunc_epilog(void)
 {
-    int v, saved_ind;
+    int v, start;
 
     /* align local size to word & save local variables */
     func_scratch = (func_scratch + 15) & -16;
@@ -1017,42 +1010,34 @@ void gfunc_epilog(void)
         g(func_ret_sub >> 8);
     }
 
-    saved_ind = ind;
-    ind = func_sub_sp_offset - FUNC_PROLOG_SIZE;
     v = -loc;
+    start = func_sub_sp_offset - FUNC_PROLOG_SIZE;
+    cur_text_section->data_offset = ind;
+    pe_add_unwind_data(start, ind, v);
 
-    /* Probing a large frame is what the runtime beneath a Windows program does; a kernel has
-       no such helper to call, and the stack it lends is not one that grows. */
-#ifdef TCC_TARGET_PE
+    ind = start;
     if (v >= 4096) {
-        Sym *sym = external_global_sym(TOK___chkstk, &func_old_type);
+        Sym *sym = external_helper_sym(TOK___chkstk);
         oad(0xb8, v); /* mov stacksize, %eax */
         oad(0xe8, 0); /* call __chkstk, (does the stackframe too) */
-        greloca(cur_text_section, sym, ind-4, R_X86_64_PC32, -4);
+        greloca(cur_text_section, sym, ind-4, R_X86_64_PLT32, -4);
         o(0x90); /* fill for FUNC_PROLOG_SIZE = 11 bytes */
-    } else
-#endif
-    {
+    } else {
         o(0xe5894855);  /* push %rbp, mov %rsp, %rbp */
         o(0xec8148);  /* sub rsp, stacksize */
         gen_le32(v);
     }
+    ind = cur_text_section->data_offset;
 
     /* add the "func_scratch" area after each alloca seen */
     gsym_addr(func_alloca, -func_scratch);
-
-    cur_text_section->data_offset = saved_ind;
-#ifdef TCC_TARGET_PE
-    pe_add_unwind_data(ind, saved_ind, v);
-#endif
-    ind = cur_text_section->data_offset;
 }
 
 #else
 
 static void gadd_sp(int val)
 {
-    if (val == (char)val) {
+    if (val == (signed char)val) {
         o(0xc48348);
         g(val);
     } else {
@@ -1136,7 +1121,8 @@ static X86_64_Mode classify_x86_64_arg(CType *ty, CType *ret, int *psize, int *p
         size = type_size(ty, &align);
         *psize = (size + 7) & ~7;
         *palign = (align + 7) & ~7;
-    
+        *reg_count = 0; /* avoid compiler warning */
+
         if (size > 16) {
             mode = x86_64_mode_memory;
         } else {
@@ -1208,9 +1194,11 @@ ST_FUNC int classify_x86_64_va_arg(CType *ty)
 ST_FUNC int gfunc_sret(CType *vt, int variadic, CType *ret, int *ret_align, int *regsize)
 {
     int size, align, reg_count;
+    if (classify_x86_64_arg(vt, ret, &size, &align, &reg_count) == x86_64_mode_memory)
+        return 0;
     *ret_align = 1; // Never have to re-align return values for x86-64
-    *regsize = 8;
-    return (classify_x86_64_arg(vt, ret, &size, &align, &reg_count) != x86_64_mode_memory);
+    *regsize = 8 * reg_count; /* the (virtual) regsize is 16 for VT_QLONG/QFLOAT */
+    return 1;
 }
 
 #define REGN 6
@@ -1223,7 +1211,7 @@ static int arg_prepare_reg(int idx) {
       /* idx=2: r10, idx=3: r11 */
       return idx + 8;
   else
-      return arg_regs[idx];
+      return idx >= 0 && idx < REGN ? arg_regs[idx] : 0;
 }
 
 /* Generate function call. The function address is pushed first, then
@@ -1243,6 +1231,8 @@ void gfunc_call(int nb_args)
     if (tcc_state->do_bounds_check)
         gbound_args(nb_args);
 #endif
+
+    save_regs(nb_args);
 
     /* calculate the number of integer/float register arguments, remember
        arguments to be passed via stack (in onstack[]), and also remember
@@ -1272,10 +1262,6 @@ void gfunc_call(int nb_args)
 
     if (nb_sse_args && tcc_state->nosse)
       tcc_error("SSE disabled but floating point arguments passed");
-
-    /* fetch cpu flag before generating any code */
-    if ((vtop->r & VT_VALMASK) == VT_CMP)
-      gv(RC_INT);
 
     /* for struct arguments, we need to call memcpy and the function
        call breaks register passing arguments we are preparing.
@@ -1317,7 +1303,14 @@ void gfunc_call(int nb_args)
 		o(0xe0 + REG_VALUE(r));
 		vset(&vtop->type, r | VT_LVAL, 0);
 		vswap();
+		/* keep stack aligned for (__bound_)memmove call */
+		o(0x10ec8348); /* sub $16,%rsp */
+		o(0xf0e48348); /* and $-16,%rsp */
+		orex(0,r,0,0x50 + REG_VALUE(r)); /* push r (last %rsp) */
+		o(0x08ec8348); /* sub $8,%rsp */
 		vstore();
+		o(0x08c48348); /* add $8,%rsp */
+		o(0x5c);       /* pop %rsp */
 		break;
 
 	    case VT_LDOUBLE:
@@ -1355,9 +1348,6 @@ void gfunc_call(int nb_args)
     }
 
     tcc_free(onstack);
-
-    /* XXX This should be superfluous.  */
-    save_regs(0); /* save used temporary registers */
 
     /* then, we prepare register passing arguments.
        Note that we cannot set RDX and RCX in this loop because gv()
@@ -1408,12 +1398,6 @@ void gfunc_call(int nb_args)
     assert(gen_reg == 0);
     assert(sse_reg == 0);
 
-    /* We shouldn't have many operands on the stack anymore, but the
-       call address itself is still there, and it might be in %eax
-       (or edx/ecx) currently, which the below writes would clobber.
-       So evict all remaining operands here.  */
-    save_regs(0);
-
     /* Copy R10 and R11 into RDX and RCX, respectively */
     if (nb_reg_args > 2) {
         o(0xd2894c); /* mov %r10, %rdx */
@@ -1441,7 +1425,7 @@ static void push_arg_reg(int i) {
 void gfunc_prolog(Sym *func_sym)
 {
     CType *func_type = &func_sym->type;
-    X86_64_Mode mode;
+    X86_64_Mode mode, ret_mode;
     int i, addr, align, size, reg_count;
     int param_addr = 0, reg_param_index, sse_param_index;
     Sym *sym;
@@ -1453,10 +1437,12 @@ void gfunc_prolog(Sym *func_sym)
     ind += FUNC_PROLOG_SIZE;
     func_sub_sp_offset = ind;
     func_ret_sub = 0;
+    ret_mode = classify_x86_64_arg(&func_vt, NULL, &size, &align, &reg_count);
 
     if (func_var) {
         int seen_reg_num, seen_sse_num, seen_stack_size;
-        seen_reg_num = seen_sse_num = 0;
+        seen_reg_num = ret_mode == x86_64_mode_memory;
+        seen_sse_num = 0;
         /* frame pointer and return address */
         seen_stack_size = PTR_SIZE * 2;
         /* count the number of seen parameters */
@@ -1496,7 +1482,7 @@ void gfunc_prolog(Sym *func_sym)
 	gen_le32(seen_stack_size);
 	/* movq %r11, -0x10(%rbp) */
 	o(0xf05d894c);
-	/* leaq $-192(%rbp), %r11 */
+	/* leaq $-200(%rbp), %r11 */
 	o(0x9d8d4c);
 	gen_le32(-176 - 24);
 	/* movq %r11, -0x8(%rbp) */
@@ -1506,8 +1492,8 @@ void gfunc_prolog(Sym *func_sym)
         for (i = 0; i < 8; i++) {
             loc -= 16;
 	    if (!tcc_state->nosse) {
-		o(0xd60f66); /* movq */
-		gen_modrm(7 - i, VT_LOCAL, NULL, loc);
+                /* movq */
+		gen_modrm32(0xd60f66, 7 - i, VT_LOCAL, NULL, loc);
 	    }
             /* movq $0, loc+8(%rbp) */
             o(0x85c748);
@@ -1525,8 +1511,7 @@ void gfunc_prolog(Sym *func_sym)
 
     /* if the function returns a structure, then add an
        implicit pointer parameter */
-    mode = classify_x86_64_arg(&func_vt, NULL, &size, &align, &reg_count);
-    if (mode == x86_64_mode_memory) {
+    if (ret_mode == x86_64_mode_memory) {
         push_arg_reg(reg_param_index);
         func_vc = loc;
         reg_param_index++;
@@ -1544,8 +1529,7 @@ void gfunc_prolog(Sym *func_sym)
                 loc -= reg_count * 8;
                 param_addr = loc;
                 for (i = 0; i < reg_count; ++i) {
-                    o(0xd60f66); /* movq */
-                    gen_modrm(sse_param_index, VT_LOCAL, NULL, param_addr + i*8);
+                    gen_modrm32(0xd60f66, sse_param_index, VT_LOCAL, NULL, param_addr + i*8);
                     ++sse_param_index;
                 }
             } else {
@@ -1580,8 +1564,7 @@ void gfunc_prolog(Sym *func_sym)
         }
 	default: break; /* nothing to be done for x86_64_mode_none */
         }
-        sym_push(sym->v & ~SYM_FIELD, type,
-                 VT_LOCAL | VT_LVAL, param_addr);
+        gfunc_set_param(sym, param_addr, 0);
     }
 
 #ifdef CONFIG_TCC_BCHECK
@@ -1617,7 +1600,7 @@ void gfunc_epilog(void)
     ind = saved_ind;
 }
 
-#endif /* not the Microsoft convention */
+#endif /* not PE */
 
 ST_FUNC void gen_fill_nops(int bytes)
 {
@@ -1636,7 +1619,7 @@ void gjmp_addr(int a)
 {
     int r;
     r = a - ind - 2;
-    if (r == (char)r) {
+    if (r == (signed char)r) {
         g(0xeb);
         g(r);
     } else {
@@ -1705,7 +1688,7 @@ void gen_opi(int op)
             r = gv(RC_INT);
             vswap();
             c = vtop->c.i;
-            if (c == (char)c) {
+            if (c == (signed char)c) {
                 /* XXX: generate inc and dec for smaller code ? */
                 orex(ll, r, 0, 0x83);
                 o(0xc0 | (opc << 3) | REG_VALUE(r));
@@ -1820,9 +1803,23 @@ void gen_opl(int op)
 /* XXX: need to use ST1 too */
 void gen_opf(int op)
 {
-    int a, ft, fc, swapped, r;
-    int float_type =
-        (vtop->type.t & VT_BTYPE) == VT_LDOUBLE ? RC_ST0 : RC_FLOAT;
+    int a, ft, fc, swapped, r, opc;
+    int bt = vtop->type.t & VT_BTYPE;
+    int float_type = bt == VT_LDOUBLE ? RC_ST0 : RC_FLOAT;
+
+    if (op == TOK_NEG) { /* unary minus */
+        gv(float_type);
+        if (float_type == RC_ST0) {
+            o(0xe0d9); /* fchs */
+        } else {
+            save_reg(vtop->r);
+            /* xor $0x80, $n(rbp) */
+            gen_modrm32(0x80, 6, vtop->r, NULL, vtop->c.i + (bt == VT_DOUBLE ? 7 : 3));
+            o(0x80);
+            gv(float_type); /* -n is not a lvalue */
+        }
+        return;
+    }
 
     /* convert constants to memory references */
     if ((vtop[-1].r & (VT_VALMASK | VT_LVAL)) == VT_CONST) {
@@ -1920,6 +1917,7 @@ void gen_opf(int op)
                 v1.type.t = VT_PTR;
                 v1.r = VT_LOCAL | VT_LVAL;
                 v1.c.i = fc;
+                v1.sym = NULL;
                 load(r, &v1);
                 fc = 0;
                 vtop->r = r = r | VT_LVAL;
@@ -1943,19 +1941,14 @@ void gen_opf(int op)
             }
             assert(!(vtop[-1].r & VT_LVAL));
             
-            if ((vtop->type.t & VT_BTYPE) == VT_DOUBLE)
-                o(0x66);
             if (op == TOK_EQ || op == TOK_NE)
-                o(0x2e0f); /* ucomisd */
+                opc = 0x2e0f; /* ucomisd */
             else
-                o(0x2f0f); /* comisd */
+                opc = 0x2f0f; /* comisd */
+            if ((vtop->type.t & VT_BTYPE) == VT_DOUBLE)
+                opc = opc << 8 | 0x66;
 
-            if (vtop->r & VT_LVAL) {
-                gen_modrm(vtop[-1].r, r, vtop->sym, fc);
-            } else {
-                o(0xc0 + REG_VALUE(vtop[0].r) + REG_VALUE(vtop[-1].r)*8);
-            }
-
+            gen_modrm32(opc, vtop[-1].r, vtop->r, vtop->sym, fc);
             vtop--;
             vset_VT_CMP(op | 0x100);
             vtop->cmp_r = op;
@@ -1980,7 +1973,6 @@ void gen_opf(int op)
             fc = vtop->c.i;
             assert((ft & VT_BTYPE) != VT_LDOUBLE);
             
-            r = vtop->r;
             /* if saved lvalue, then we must reload it */
             if ((vtop->r & VT_VALMASK) == VT_LLOCAL) {
                 SValue v1;
@@ -1988,9 +1980,10 @@ void gen_opf(int op)
                 v1.type.t = VT_PTR;
                 v1.r = VT_LOCAL | VT_LVAL;
                 v1.c.i = fc;
+	        v1.sym = NULL;
                 load(r, &v1);
                 fc = 0;
-                vtop->r = r = r | VT_LVAL;
+                vtop->r = r | VT_LVAL;
             }
             
             assert(!(vtop[-1].r & VT_LVAL));
@@ -1998,6 +1991,7 @@ void gen_opf(int op)
                 assert(vtop->r & VT_LVAL);
                 gv(RC_FLOAT);
                 vswap();
+                fc = vtop->c.i; /* bcheck may have saved previous vtop[-1] */
             }
             
             if ((ft & VT_BTYPE) == VT_DOUBLE) {
@@ -2006,14 +2000,9 @@ void gen_opf(int op)
                 o(0xf3);
             }
             o(0x0f);
-            o(0x58 + a);
+            opc = 0x58 + a;
             
-            if (vtop->r & VT_LVAL) {
-                gen_modrm(vtop[-1].r, r, vtop->sym, fc);
-            } else {
-                o(0xc0 + REG_VALUE(vtop[0].r) + REG_VALUE(vtop[-1].r)*8);
-            }
-
+            gen_modrm32(opc, vtop[-1].r, vtop->r, vtop->sym, fc);
             vtop--;
         }
     }
@@ -2132,6 +2121,15 @@ void gen_cvt_ftoi(int t)
     ft = vtop->type.t;
     bt = ft & VT_BTYPE;
     if (bt == VT_LDOUBLE) {
+	if (t != VT_INT) {
+	    vpush_helper_func(TOK___fixxfdi);
+	    vswap();
+	    gfunc_call(1);
+	    vpushi(0);
+	    vtop->r = REG_IRET;
+	    vtop->r2 = REG_IRE2;
+	    return;
+	}
         gen_cvt_ftof(VT_DOUBLE);
         bt = VT_DOUBLE;
     }
@@ -2178,8 +2176,17 @@ ST_FUNC void gen_cvt_csti(int t)
         );
 }
 
+/* increment tcov counter */
+ST_FUNC void gen_increment_tcov (SValue *sv)
+{
+   o(0x058348); /* addq $1, xxx(%rip) */
+   greloca(cur_text_section, sv->sym, ind, R_X86_64_PC32, -5);
+   gen_le32(0);
+   o(1);
+}
+
 /* computed goto support */
-void ggoto(void)
+ST_FUNC void ggoto(void)
 {
     gcall_or_jmp(1);
     vtop--;
@@ -2216,7 +2223,7 @@ ST_FUNC void gen_vla_alloc(CType *type, int align) {
 #endif
     if (use_call)
     {
-        vpush_global_sym(&func_old_type, TOK_alloca);
+        vpush_helper_func(TOK_alloca);
         vswap(); /* Move alloca ref past allocation size */
         gfunc_call(1);
     }
@@ -2233,6 +2240,38 @@ ST_FUNC void gen_vla_alloc(CType *type, int align) {
     }
 }
 
+/*
+ * Assmuing the top part of the stack looks like below,
+ *  src dest src
+ */
+ST_FUNC void gen_struct_copy(int size)
+{
+    int n = size / PTR_SIZE;
+#ifdef TCC_TARGET_PE
+    o(0x5756); /* push rsi, rdi */
+#endif
+    gv2(RC_RDI, RC_RSI);
+    if (n <= 4) {
+        while (n)
+            o(0xa548), --n;
+    } else {
+        vpushi(n);
+        gv(RC_RCX);
+        o(0xa548f3);
+        vpop();
+    }
+    if (size & 0x04)
+        o(0xa5);
+    if (size & 0x02)
+        o(0xa566);
+    if (size & 0x01)
+        o(0xa4);
+#ifdef TCC_TARGET_PE
+    o(0x5e5f); /* pop rdi, rsi */
+#endif
+    vpop();
+    vpop();
+}
 
 /* end of x86-64 code generator */
 /*************************************************************/

@@ -342,6 +342,51 @@ test_zero_init (void)
   test_correct_filling (&d.a);
   return 0;
 }
+
+void test_init_struct_from_struct(void)
+{
+    int i = 0;
+    struct S {int x,y;}
+        a = {1,2},
+        b = {3,4},
+        c[] = {a,b},
+        d[] = {++i, ++i, ++i, ++i},
+        e[] = {b, (struct S){5,6}}
+        ;
+
+    printf("%s: %d %d %d %d - %d %d %d %d - %d %d %d %d\n",
+        __FUNCTION__,
+        c[0].x,
+        c[0].y,
+        c[1].x,
+        c[1].y,
+        d[0].x,
+        d[0].y,
+        d[1].x,
+        d[1].y,
+        e[0].x,
+        e[0].y,
+        e[1].x,
+        e[1].y
+        );
+}
+
+typedef struct {
+    unsigned int a;
+    unsigned int : 32;
+    unsigned int b;
+    unsigned long long : 64;
+    unsigned int c;
+} tst_bf;
+
+tst_bf arr[] = { { 1, 2, 3 } };
+
+void
+test_init_bf(void)
+{
+    printf ("%s: %d %d %d\n", __FUNCTION__, arr[0].a, arr[0].b, arr[0].c);
+}
+
 
 int main()
 {
@@ -373,5 +418,7 @@ int main()
   test_multi_relocs();
   test_zero_init();
   test_init_ranges();
+  test_init_struct_from_struct();
+  test_init_bf();
   return 0;
 }

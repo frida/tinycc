@@ -21,6 +21,9 @@
 
 #include "tcc.h"
 
+/* XXX: this file uses tcc_error() to the effect of exit(1) */
+#undef _tcc_error
+
 #define MAXNSCNS 255		/* MAXIMUM NUMBER OF SECTIONS         */
 #define MAX_STR_TABLE 1000000
 AOUTHDR o_filehdr;		/* OPTIONAL (A.OUT) FILE HEADER       */
@@ -247,8 +250,8 @@ ST_FUNC int tcc_output_coff(TCCState *s1, FILE *f)
 
 			p = strchr(str, ':');
 			if (!p) {
-			    tcc_pstrcpy(func_name, sizeof(func_name), str);
-			    tcc_pstrcpy(Func[nFuncs], sizeof(func_name), str);
+			    pstrcpy(func_name, sizeof(func_name), str);
+			    pstrcpy(Func[nFuncs], sizeof(func_name), str);
 			} else {
 			    len = p - str;
 			    if (len > sizeof(func_name) - 1)
@@ -259,8 +262,8 @@ ST_FUNC int tcc_output_coff(TCCState *s1, FILE *f)
 			}
 
 			// save the file that it came in so we can sort later
-			tcc_pstrcpy(AssociatedFile[nFuncs], sizeof(func_name),
-				    incl_files[incl_index - 1]);
+			pstrcpy(AssociatedFile[nFuncs], sizeof(func_name),
+				incl_files[incl_index - 1]);
 
 			func_addr = sym->n_value;
 		    }
@@ -422,7 +425,7 @@ ST_FUNC int tcc_output_coff(TCCState *s1, FILE *f)
 
 			p = strchr(str, ':');
 			if (!p) {
-			    tcc_pstrcpy(func_name, sizeof(func_name), str);
+			    pstrcpy(func_name, sizeof(func_name), str);
 			} else {
 			    len = p - str;
 			    if (len > sizeof(func_name) - 1)

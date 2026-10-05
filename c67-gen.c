@@ -108,14 +108,20 @@ enum {
 /* maximum alignment (for aligned attribute support) */
 #define MAX_ALIGN     8
 
+#undef CONFIG_TCC_BCHECK
+
 /******************************************************/
 #else /* ! TARGET_DEFS_ONLY */
 /******************************************************/
 #define USING_GLOBALS
 #include "tcc.h"
 
+ST_DATA const char * const target_machine_defs =
+    "__C67__\0"
+    ;
+
 ST_DATA const int reg_classes[NB_REGS] = {
-    /* eax */ RC_INT | RC_FLOAT | RC_EAX, 
+    /* eax */ RC_INT | RC_FLOAT | RC_EAX,
     // only allow even regs for floats (allow for doubles)
     /* ecx */ RC_INT | RC_ECX,
     /* edx */ RC_INT | RC_INT_BSIDE | RC_FLOAT | RC_EDX,
@@ -365,7 +371,7 @@ int C67_map_D12(char *s)
 
 
 
-void C67_asm(char *s, int a, int b, int c)
+void C67_asm(const char *s, int a, int b, int c)
 {
     BOOL xpath;
 
@@ -1962,7 +1968,7 @@ void gfunc_prolog(Sym *func_sym)
     /* define parameters */
     while ((sym = sym->next) != NULL) {
 	type = &sym->type;
-	sym_push(sym->v & ~SYM_FIELD, type, VT_LOCAL | VT_LVAL, addr);
+	gfunc_set_param(sym, addr, 0);
 	size = type_size(type, &align);
 	size = (size + 3) & ~3;
 
@@ -2254,7 +2260,7 @@ void gen_opi(int op)
       call_func:
 	vswap();
 	/* call generic idiv function */
-	vpush_global_sym(&func_old_type, t);
+	vpush_helper_func(t);
 	vrott(3);
 	gfunc_call(2);
 	vpushi(0);
@@ -2385,7 +2391,7 @@ void gen_opf(int op)
 		// must call intrinsic DP floating point divide
 		vswap();
 		/* call generic idiv function */
-		vpush_global_sym(&func_old_type, TOK__divd);
+		vpush_helper_func(TOK__divd);
 		vrott(3);
 		gfunc_call(2);
 		vpushi(0);
@@ -2396,7 +2402,7 @@ void gen_opf(int op)
 		// must call intrinsic SP floating point divide
 		vswap();
 		/* call generic idiv function */
-		vpush_global_sym(&func_old_type, TOK__divf);
+		vpush_helper_func(TOK__divf);
 		vrott(3);
 		gfunc_call(2);
 		vpushi(0);

@@ -52,7 +52,7 @@ static int run_callback(const char *src, callback_type callback) {
     return -1;
   if (tcc_compile_string(s, src) == -1)
     return -1;
-  if (tcc_relocate(s, TCC_RELOCATE_AUTO) == -1)
+  if (tcc_relocate(s) == -1)
     return -1;
   
   ptr = tcc_get_symbol(s, "f");

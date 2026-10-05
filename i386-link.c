@@ -15,17 +15,21 @@
 #define ELF_START_ADDR 0x08048000
 #define ELF_PAGE_SIZE  0x1000
 
+#if defined CONFIG_TCC_PIC
+#define PCRELATIVE_DLLPLT 1
+#else
 #define PCRELATIVE_DLLPLT 0
-#define RELOCATE_DLLPLT 0
+#endif
+#define RELOCATE_DLLPLT 1
 
 #else /* !TARGET_DEFS_ONLY */
 
 #include "tcc.h"
 
-#ifndef ELF_OBJ_ONLY
+#ifdef NEED_RELOC_TYPE
 /* Returns 1 for a code relocation, 0 for a data relocation. For unknown
    relocations, returns -1. */
-int code_reloc (int reloc_type)
+ST_FUNC int code_reloc (int reloc_type)
 {
     switch (reloc_type) {
 	case R_386_RELATIVE:
@@ -55,7 +59,7 @@ int code_reloc (int reloc_type)
 /* Returns an enumerator to describe whether and when the relocation needs a
    GOT and/or PLT entry to be created. See tcc.h for a description of the
    different values. */
-int gotplt_entry_type (int reloc_type)
+ST_FUNC int gotplt_entry_type (int reloc_type)
 {
     switch (reloc_type) {
 	case R_386_RELATIVE:
@@ -91,6 +95,7 @@ int gotplt_entry_type (int reloc_type)
     return -1;
 }
 
+#ifdef NEED_BUILD_GOT
 ST_FUNC unsigned create_plt_entry(TCCState *s1, unsigned got_offset, struct sym_attr *attr)
 {
     Section *plt = s1->plt;
@@ -99,7 +104,7 @@ ST_FUNC unsigned create_plt_entry(TCCState *s1, unsigned got_offset, struct sym_
     unsigned plt_offset, relofs;
 
     /* on i386 if we build a DLL, we add a %ebx offset */
-    if (s1->output_type == TCC_OUTPUT_DLL)
+    if (s1->output_type & TCC_OUTPUT_DYN)
         modrm = 0xa3;
     else
         modrm = 0x25;
@@ -121,7 +126,7 @@ ST_FUNC unsigned create_plt_entry(TCCState *s1, unsigned got_offset, struct sym_
     /* The PLT slot refers to the relocation entry it needs via offset.
        The reloc entry is created below, so its offset is the current
        data_offset */
-    relofs = s1->got->reloc ? s1->got->reloc->data_offset : 0;
+    relofs = s1->plt->reloc ? s1->plt->reloc->data_offset : 0;
 
     /* Jump to GOT entry where ld.so initially put the address of ip + 4 */
     p = section_ptr_add(plt, 16);
@@ -129,7 +134,7 @@ ST_FUNC unsigned create_plt_entry(TCCState *s1, unsigned got_offset, struct sym_
     p[1] = modrm;
     write32le(p + 2, got_offset);
     p[6] = 0x68; /* push $xxx */
-    write32le(p + 7, relofs);
+    write32le(p + 7, relofs - sizeof (ElfW_Rel));
     p[11] = 0xe9; /* jmp plt_start */
     write32le(p + 12, -(plt->data_offset));
     return plt_offset;
@@ -147,7 +152,7 @@ ST_FUNC void relocate_plt(TCCState *s1)
     p = s1->plt->data;
     p_end = p + s1->plt->data_offset;
 
-    if (p < p_end) {
+    if (!(s1->output_type & TCC_OUTPUT_DYN) && p < p_end) {
         add32le(p + 2, s1->got->sh_addr);
         add32le(p + 8, s1->got->sh_addr);
         p += 16;
@@ -156,10 +161,21 @@ ST_FUNC void relocate_plt(TCCState *s1)
             p += 16;
         }
     }
+
+    if (s1->plt->reloc) {
+        ElfW_Rel *rel;
+        int x = s1->plt->sh_addr + 16 + 6;
+        p = s1->got->data;
+        for_each_elem(s1->plt->reloc, 0, rel, ElfW_Rel) {
+            write32le(p + rel->r_offset, x);
+            x += 16;
+        }
+    }
 }
 #endif
+#endif
 
-void relocate(TCCState *s1, ElfW_Rel *rel, int type, unsigned char *ptr, addr_t addr, addr_t val)
+ST_FUNC void relocate(TCCState *s1, ElfW_Rel *rel, int type, unsigned char *ptr, addr_t addr, addr_t val)
 {
     int sym_index, esym_index;
 
@@ -167,7 +183,7 @@ void relocate(TCCState *s1, ElfW_Rel *rel, int type, unsigned char *ptr, addr_t 
 
     switch (type) {
         case R_386_32:
-            if (s1->output_type == TCC_OUTPUT_DLL) {
+            if (s1->output_type & TCC_OUTPUT_DYN) {
                 esym_index = get_sym_attr(s1, sym_index, 0)->dyn_index;
                 qrel->r_offset = rel->r_offset;
                 if (esym_index) {
@@ -215,7 +231,7 @@ void relocate(TCCState *s1, ElfW_Rel *rel, int type, unsigned char *ptr, addr_t 
         case R_386_16:
             if (s1->output_format != TCC_OUTPUT_FORMAT_BINARY) {
             output_file:
-                tcc_error("can only produce 16-bit binary files");
+                tcc_error_noabort("can only produce 16-bit binary files");
             }
             write16le(ptr, read16le(ptr) + val);
             return;
@@ -262,7 +278,7 @@ void relocate(TCCState *s1, ElfW_Rel *rel, int type, unsigned char *ptr, addr_t 
                     add32le(ptr + 5, -x);
                 }
                 else
-                    tcc_error("unexpected R_386_TLS_GD pattern");
+                    tcc_error_noabort("unexpected R_386_TLS_GD pattern");
             }
             return;
         case R_386_TLS_LDM:
@@ -285,11 +301,10 @@ void relocate(TCCState *s1, ElfW_Rel *rel, int type, unsigned char *ptr, addr_t 
                     rel[1].r_info = ELFW(R_INFO)(0, R_386_NONE);
                 }
                 else
-                    tcc_error("unexpected R_386_TLS_LDM pattern");
+                    tcc_error_noabort("unexpected R_386_TLS_LDM pattern");
             }
             return;
         case R_386_TLS_LDO_32:
-        case R_386_TLS_LE:
             {
                 ElfW(Sym) *sym;
                 Section *sec;
@@ -298,6 +313,19 @@ void relocate(TCCState *s1, ElfW_Rel *rel, int type, unsigned char *ptr, addr_t 
                 sym = &((ElfW(Sym) *)symtab_section->data)[sym_index];
                 sec = s1->sections[sym->st_shndx];
                 x = val - sec->sh_addr - sec->data_offset;
+                add32le(ptr, x);
+            }
+            return;
+        case R_386_TLS_LE:
+            {
+                int32_t x;
+                if (s1->tls_end) {
+                    x = val - s1->tls_end;
+                } else {
+                    ElfW(Sym) *sym = &((ElfW(Sym) *)symtab_section->data)[sym_index];
+                    Section *sec = s1->sections[sym->st_shndx];
+                    x = val - sec->sh_addr - sec->data_offset;
+                }
                 add32le(ptr, x);
             }
             return;

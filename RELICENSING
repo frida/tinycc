@@ -30,23 +30,30 @@
  Adam Sampson               YES                 makefiles
  Daniel Glöckner            NO                  arm-gen.c
  Daniel Glöckner            YES                 not arm-gen.c
+ Danny Milosavljevic        YES                 arm-asm.c riscv64-asm.c
  Edmund Grimley Evans       YES                 arm64
  Fabrice Bellard            YES                 original author
  Frédéric Féret             YES                 x86 64/16 bit asm
  grischka                   YES                 tccpe.c
  Henry Kroll                YES
+ Herman ten Brugge	    YES
  Joe Soroka                 YES
  Kirill Smelkov             YES
  mingodad                   YES
  Pip Cet                    YES
  Shinichiro Hamaji          YES                 x86_64-gen.c
+ Steffen Nurpmeso           YES
  Vincent Lefèvre            YES
  Thomas Preud'homme         YES                 arm-gen.c
  Timo VJ Lähde (Timppa)     ?                   tiny_libmaker.c
  TK                         ?                   tcccoff.c c67-gen.c
+ Tyge Løvset                YES                 tgmath.h, Windows tcc_libm.h math.h
  Urs Janssen                YES
  waddlesplash               YES
  Christian Jullien          YES                 Windows Cygwin build and tests
+ Reimar Döffinger           YES
+ noneofyourbusiness         YES
+ Cyan Ogilvie               YES
 
 
  ------------------------------------------------------------------------------

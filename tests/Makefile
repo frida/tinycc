@@ -4,8 +4,8 @@
 
 TOP = ..
 include $(TOP)/Makefile
-VPATH = $(TOPSRC)/tests $(TOPSRC) $(TOP)
-CFLAGS := $(filter-out -W% -g% -O%,$(CFLAGS)) -I$(TOPSRC) $(LDFLAGS)
+VPATH = $(TOPSRC)/tests $(TOPSRC)
+CFLAGS := $(filter-out -g% -O%,$(CFLAGS)) -I$(TOPSRC) -I$(TOP) $(LDFLAGS)
 
 # what tests to run
 TESTS = \
@@ -14,85 +14,77 @@ TESTS = \
  libtest \
  libtest_mt \
  test3 \
- memtest \
- dlltest \
  abitest \
  asm-c-connect-test \
  vla_test-run \
- cross-test \
  tests2-dir \
- pp-dir
+ pp-dir \
+ memtest \
+ dlltest \
+ cross-test
 
-BTESTS = btest test1b
 # test4_static -- Not all relocation types are implemented yet.
 # asmtest / asmtest2 -- minor differences with gcc
 
-# bounds-checking is supported on i386 and x86_64 on linux and windows
-ifeq (-$(CONFIG_musl)-, --)
-ifeq ($(ARCH),i386)
- TESTS += $(BTESTS)
+ifeq ($(CONFIG_backtrace),no)
+ TESTS := $(filter-out libtest_mt, $(TESTS))
+else ifneq ($(CONFIG_bcheck),no)
+ TESTS += btest test1b tccb
 endif
-ifeq ($(ARCH),x86_64)
- TESTS += $(BTESTS)
-endif
-ifeq ($(ARCH),arm)
- TESTS += $(BTESTS)
-endif
-ifeq ($(ARCH),arm64)
- TESTS += $(BTESTS)
-endif
-ifeq ($(ARCH),riscv64)
- TESTS += $(BTESTS)
-endif
-endif
-ifdef CONFIG_OSX # some don't work yet
+ifeq ($(CONFIG_dll),no)
  TESTS := $(filter-out dlltest, $(TESTS))
 endif
-ifeq (,$(filter arm64 i386 x86_64,$(ARCH)))
- TESTS := $(filter-out vla_test-run,$(TESTS))
-endif
-ifeq ($(CONFIG_arm_eabi),yes)
- TESTS := $(filter-out test3,$(TESTS))
+ifeq (-$(CONFIG_arm_eabi)-$(CONFIG_arm_vfp)-,-yes--)
+ TESTS := $(filter-out test3 test1b,$(TESTS))
 endif
 ifeq (,$(filter i386 x86_64,$(ARCH)))
- TESTS := $(filter-out dlltest asm-c-connect-test,$(TESTS))
+ TESTS := $(filter-out asm-c-connect-test,$(TESTS))
 endif
-
 ifeq ($(OS),Windows_NT) # for libtcc_test to find libtcc.dll
  PATH := $(CURDIR)/$(TOP)$(if $(findstring ;,$(PATH)),;,:)$(PATH)
 endif
-
 ifdef CONFIG_OSX
 LIBS += $(LINK_LIBTCC)
 endif
-
-
 ifeq ($(ARCH),arm)
 # tcctest refers to the alignment of functions, and with thumb mode
 # the low bit of code addresses selects the mode, so the "alignment"
 # of functions via bit masking comes out as 1.  Just disable thumb.
 test.ref: CFLAGS+=-marm
 endif
-ifeq ($(ARCH),i386)
+ifeq ($(ARCH)$(CONFIG_WIN32),i386)
 # tcctest.c:get_asm_string uses a construct that is checked too strictly
 # by GCC in 32bit mode when PIC is enabled.
-test.ref: CFLAGS+=-fno-PIC -fno-PIE
+test.ref: CFLAGS+=-fno-PIC -fno-PIE -Wl,-z,notext
 endif
 ifeq ($(CC_NAME),msvc)
 test.ref abitest : CC = gcc
 endif
+ifeq ($(TARGETOS),OpenBSD)
+dlltest: CFLAGS+=-fno-stack-protector
+endif
+ifneq (,$(filter FreeBSD NetBSD,$(TARGETOS)))
+  # test3 has dlsym problems
+  TESTS := $(filter-out test3,$(TESTS))
+  TESTS += test1
+endif
 
-RUN_TCC = $(NATIVE_DEFINES) -run $(TOPSRC)/tcc.c $(TCCFLAGS)
+RUN_TCC = -run $(TOPSRC)/tcc.c $(TCCFLAGS)
 DISAS = objdump -d
 ifdef CONFIG_OSX
-DUMPTCC = (set -x; $(TOP)/tcc -vv; otool -L $(TOP)/tcc; exit 1)
+DUMPTCC = (set -x; $(TCC_LOCAL) -vv; otool -L $(TCC_LOCAL); exit 1)
 else
-DUMPTCC = (set -x; $(TOP)/tcc -vv; ldd $(TOP)/tcc; exit 1)
+DUMPTCC = (set -x; $(TCC_LOCAL) -vv; ldd $(TCC_LOCAL); exit 1)
 endif
 
 all test :
+	@echo ------------ version ------------
+	@$(TCC_LOCAL) -v
 	@$(MAKE) --no-print-directory -s clean
-	@$(MAKE) --no-print-directory -s -r $(TESTS)
+	@$(MAKE) --no-print-directory -s -r _all
+	@echo ------- ALL TESTS PASSED --------
+
+_all : $(TESTS)
 
 hello-exe: ../examples/ex1.c
 	@echo ------------ $@ ------------
@@ -104,13 +96,13 @@ hello-run: ../examples/ex1.c
 
 libtes%: libtcc_tes%$(EXESUF)
 	@echo ------------ $@ ------------
-	./libtcc_tes$*$(EXESUF) $(TOPSRC)/tcc.c $(TCCFLAGS) $(NATIVE_DEFINES)
+	./libtcc_tes$*$(EXESUF) $(TOPSRC)/tcc.c $(TCCFLAGS)
 
-libtcc_test$(EXESUF): libtcc_test.c $(LIBTCC)
-	$(CC) -o $@ $^ $(CFLAGS) $(LIBS)
+libtcc_test$(EXESUF): libtcc_test.c
+	$(CC) -o $@ $< $(CFLAGS) $(-LTCC) $(LIBS)
 
-libtcc_test_mt$(EXESUF): libtcc_test_mt.c $(LIBTCC)
-	$(CC) -o $@ $^ $(CFLAGS) $(LIBS)
+libtcc_test_mt$(EXESUF): libtcc_test_mt.c
+	$(CC) -o $@ $< $(CFLAGS) $(-LTCC) $(LIBS)
 
 %-dir:
 	@echo ------------ $@ ------------
@@ -118,8 +110,8 @@ libtcc_test_mt$(EXESUF): libtcc_test_mt.c $(LIBTCC)
 
 # test.ref - generate using cc
 test.ref: tcctest.c
-	$(CC) -o tcctest.gcc $< $(NATIVE_DEFINES) $(CFLAGS) -w -O0 -std=gnu99 -fno-omit-frame-pointer
-	./tcctest.gcc > $@
+	$(CC) -o tcctest.gcc$(EXESUF) $< $(CFLAGS) -w -O0 -std=gnu99 -fno-omit-frame-pointer
+	./tcctest.gcc$(EXESUF) > $@
 
 # auto test
 test1 test1b: tcctest.c test.ref
@@ -170,23 +162,23 @@ test4_static: tcctest.c test.ref
 # use tcc to create libtcc.so/.dll and the tcc(.exe) frontend and run them
 dlltest:
 	@echo ------------ $@ ------------
-	$(TCC) $(NATIVE_DEFINES) -DLIBTCC_AS_DLL $(TOPSRC)/libtcc.c $(LIBS) -shared -o libtcc2$(DLLSUF)
-	$(TCC) $(NATIVE_DEFINES) -DONE_SOURCE=0 $(TOPSRC)/tcc.c libtcc2$(DLLSUF) $(LIBS) -Wl,-rpath=. -o tcc2$(EXESUF)
+	$(TCC) -DLIBTCC_AS_DLL $(TOPSRC)/libtcc.c $(LIBS) -shared -o libtcc2$(DLLSUF)
+	$(TCC) -DONE_SOURCE=0 $(TOPSRC)/tcc.c libtcc2$(DLLSUF) $(LIBS) -Wl,-rpath=. -o tcc2$(EXESUF)
 	./tcc2$(EXESUF) $(TCCFLAGS) $(RUN_TCC) -run $(TOPSRC)/examples/ex1.c
-ifndef CONFIG_WIN32
+ifeq (,$(filter Darwin WIN32,$(TARGETOS)))
 	@echo ------------ $@ with PIC ------------
-	$(CC) $(CFLAGS) -fPIC $(NATIVE_DEFINES) -DLIBTCC_AS_DLL -c $(TOPSRC)/libtcc.c
+	$(CC) $(CFLAGS) -fPIC -DLIBTCC_AS_DLL -c $(TOPSRC)/libtcc.c
 	$(TCC) libtcc.o $(LIBS) -shared -o libtcc2$(DLLSUF)
-	$(TCC) $(NATIVE_DEFINES) -DONE_SOURCE=0 $(TOPSRC)/tcc.c libtcc2$(DLLSUF) $(LIBS) -Wl,-rpath=. -o tcc2$(EXESUF)
+	$(TCC) -DONE_SOURCE=0 $(TOPSRC)/tcc.c libtcc2$(DLLSUF) $(LIBS) -Wl,-rpath=. -o tcc2$(EXESUF)
 	./tcc2$(EXESUF) $(TCCFLAGS) $(RUN_TCC) -run $(TOPSRC)/examples/ex1.c
 endif
 	@rm tcc2$(EXESUF) libtcc2$(DLLSUF)
 
 memtest:
 	@echo ------------ $@ ------------
-	$(CC) $(CFLAGS) $(NATIVE_DEFINES) -DMEM_DEBUG=2 $(TOPSRC)/tcc.c $(LIBS) -o memtest-tcc$(EXESUF)
-	./memtest-tcc$(EXESUF) $(TCCFLAGS) $(NATIVE_DEFINES) $(TOPSRC)/tcc.c $(LIBS)
-	./memtest-tcc$(EXESUF) $(TCCFLAGS) $(NATIVE_DEFINES) -run $(TOPSRC)/tcc.c $(TCCFLAGS) -w $(TOPSRC)/tests/tcctest.c
+	$(CC) $(CFLAGS) -DMEM_DEBUG=2 $(TOPSRC)/tcc.c $(LIBS) -o memtest-tcc$(EXESUF)
+	./memtest-tcc$(EXESUF) $(TCCFLAGS) $(TOPSRC)/tcc.c $(LIBS)
+	./memtest-tcc$(EXESUF) $(TCCFLAGS) -run $(TOPSRC)/tcc.c $(TCCFLAGS) -w $(TOPSRC)/tests/tcctest.c
 	@echo OK
 
 # memory and bound check auto test
@@ -209,7 +201,15 @@ btest: boundtest.c
 	       echo "Test $$i failed as expected" ; \
 	   fi ;\
 	done ;\
-	echo Bound test OK
+	echo Bound-Test OK
+
+tccb:
+	@echo ------------ $@ ------------
+	$(TCC) -b $(TOPSRC)/tcc.c $(TCCFLAGS) $(LIBS) -o tccb1.exe
+	mv tccb1.exe tccb2.exe
+	./tccb2.exe -b $(TOPSRC)/tcc.c $(TCCFLAGS) $(LIBS) -o tccb1.exe
+	cmp -s tccb1.exe tccb2.exe && echo "Exe Bound-Test OK"
+
 
 # speed test
 speedtest: ex2 ex3
@@ -222,7 +222,7 @@ speedtest: ex2 ex3
 weaktest: tcctest.c test.ref
 	@echo ------------ $@ ------------
 	$(TCC) -c $< -o weaktest.tcc.o
-	$(CC) -c $< -o weaktest.gcc.o $(NATIVE_DEFINES) $(CFLAGS) -w -O0 -std=gnu99 -fno-omit-frame-pointer
+	$(CC) -c $< -o weaktest.gcc.o $(CFLAGS) -w -O0 -std=gnu99 -fno-omit-frame-pointer
 	objdump -t weaktest.tcc.o | grep ' w ' | sed -e 's/.* \([a-zA-Z0-9_]*\)$$/\1/' | LC_ALL=C sort > weaktest.tcc.o.txt
 	objdump -t weaktest.gcc.o | grep ' w ' | sed -e 's/.* \([a-zA-Z0-9_]*\)$$/\1/' | LC_ALL=C sort > weaktest.gcc.o.txt
 	diff weaktest.gcc.o.txt weaktest.tcc.o.txt && echo "Weak Auto Test OK"
@@ -232,32 +232,37 @@ ex%: $(TOPSRC)/examples/ex%.c
 
 # tiny assembler testing
 asmtest.ref: asmtest.S
-	$(CC) -Wa,-W -o asmtest.ref.o -c asmtest.S
+	$(CC) -Wa,-W -Wa,-mx86-used-note=no -o asmtest.ref.o -c asmtest.S
 	objdump -D asmtest.ref.o > asmtest.ref
 
+ifeq ($(ARCH),arm)
+asmtest asmtest2:
+	TCC="${TCC}" ./arm-asm-testsuite.sh
+else
 asmtest asmtest2: asmtest.ref
 	@echo ------------ $@ ------------
 	$(TCC) $(MAYBE_RUN_TCC) -c asmtest.S
 	objdump -D asmtest.o > asmtest.out
 	@if diff -u --ignore-matching-lines="file format" asmtest.ref asmtest.out ; then echo "ASM Auto Test OK"; fi
+endif
 
 # test assembler with tcc compiled by itself
 asmtest2: MAYBE_RUN_TCC = $(RUN_TCC)
 
 # Check that code generated by libtcc is binary compatible with
 # that generated by CC
-abitest-cc.exe: abitest.c $(LIBTCC)
-	$(CC) -o $@ $^ $(CFLAGS) $(LIBS) -w
+abitest-cc.exe: abitest.c
+	$(CC) -o $@ $^ $(CFLAGS) $(-LTCC) $(LIBS) -w
 
 abitest-tcc.exe: abitest.c libtcc.c
-	$(TCC) -o $@ $^ $(NATIVE_DEFINES) $(LIBS)
+	$(TCC) -o $@ $^ $(LIBS)
 
 abitest-% : abitest-%.exe
 	@echo ------------ $@ ------------
 	./$< $(TCCFLAGS)
 
 abitest: abitest-cc
-ifneq ($(CONFIG_arm_eabi),yes) # not ARM soft-float
+ifneq (-$(CONFIG_arm_eabi)-$(CONFIG_arm_vfp)-,-yes--)
 abitest: abitest-tcc
 endif
 
@@ -267,6 +272,8 @@ vla_test$(EXESUF): vla_test.c
 vla_test-run: vla_test$(EXESUF)
 	@echo ------------ $@ ------------
 	./vla_test$(EXESUF)
+
+.PHONY: abitest vla_test tccb
 
 asm-c-connect$(EXESUF): asm-c-connect-1.c asm-c-connect-2.c
 	$(TCC) -o $@ $^
@@ -283,16 +290,40 @@ asm-c-connect-test: asm-c-connect$(EXESUF) asm-c-connect-sep$(EXESUF)
 	./asm-c-connect-sep$(EXESUF) > asm-c-connect.out2 && cat asm-c-connect.out2
 	@diff -u asm-c-connect.out1 asm-c-connect.out2 || (echo "error"; exit 1)
 
-TCC_YY = $(foreach T,$(TCC_X),$(if $(wildcard $(TOP)/$T-tcc$(EXESUF)),$T))
-
-cross-test :
-	$(if $(strip $(TCC_YY)),\
-	    $(MAKE) $(foreach T,$(TCC_YY),cross-$T.test) --no-print-directory,:)
-
-cross-%.test :
+# quick sanity check for cross-compilers
+cross-test : tcctest.c examples/ex3.c
 	@echo ------------ $@ ------------
-	$(TOP)/$*-tcc$(EXESUF) -v $(TCCFLAGS-$(if $(findstring win,$*),win,unx))\
-	    -c $(TOPSRC)/examples/ex3.c
+	$(foreach T,$(CROSS-TGTS),$(call CROSS-COMPILE,$T))
+
+CROSS-TGTS = \
+ i386 \
+ i386-win32 \
+ i386-OpenBSD \
+ x86_64 \
+ x86_64-win32 \
+ x86_64-osx \
+ x86_64-FreeBSD \
+ x86_64-NetBSD \
+ x86_64-OpenBSD \
+ arm-fpa \
+ arm-eabihf \
+ arm-NetBSD \
+ arm-wince \
+ arm64 \
+ arm64-win32 \
+ arm64-osx \
+ arm64-FreeBSD \
+ arm64-NetBSD \
+ arm64-OpenBSD \
+ riscv64 \
+ c67
+
+define CROSS-COMPILE
+ @echo " . $(1)"
+ $(TCC) $(DEF-$1) -DTCC_CROSS_TEST -run $(TOPSRC)/tcc.c \
+    -c $(if $(findstring c67,$1),$(filter %/ex3.c,$^),$<) -w $(TCCFLAGS)
+
+endef
 
 # targets for development
 %.bin: %.c tcc
@@ -313,7 +344,7 @@ cache: tcc_g
 clean:
 	rm -f *~ *.o *.a *.bin *.i *.ref *.out *.out? *.out?b *.cc *.gcc
 	rm -f *-cc *-gcc *-tcc *.exe hello libtcc_test vla_test tcctest[1234]
-	rm -f asm-c-connect$(EXESUF) asm-c-connect-sep$(EXESUF)
+	rm -f asm-c-connect asm-c-connect-sep
 	rm -f ex? tcc_g weaktest.*.txt *.def *.pdb *.obj libtcc_test_mt
 	@$(MAKE) -C tests2 $@
 	@$(MAKE) -C pp $@

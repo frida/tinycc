@@ -33,9 +33,7 @@ void tst_const_addr(void)
 {
   void *addr = mmap ((void *)0x20000000, 4096, PROT_READ | PROT_WRITE, MAP_FIXED | MAP_ANONYMOUS, -1, 0);
   if (addr != (void *) -1) {
-#if !defined(__riscv)
     *(int *)0x20000000 += 42;
-#endif
     munmap (addr, 4096);
   }
 }
@@ -90,6 +88,37 @@ void tst_cast(void)
   printf ("schar to ushort cast: %x\n", r);
 }
 
+struct {
+    int (*print)(const char *format, ...);
+} tst_indir = {
+    printf
+};
+
+void tst_indir_func(void)
+{
+    tst_indir.print("tst_indir_func %d\n", 10);
+}
+
+struct V {
+  int x, y, z;
+};
+
+struct V vec(void)
+{
+  return (struct V) { 1, 2, 3 };
+}
+
+void func(float f, struct V v)
+{
+  printf("%g\n", f);
+}
+
+void tst_struct_return_align(void)
+{
+  float d = 5.0f;
+  func(d, vec());
+}
+
 int
 main (void)
 {
@@ -107,4 +136,6 @@ main (void)
   tst_compare();
   tst_pack();
   tst_cast();
+  tst_indir_func();
+  tst_struct_return_align();
 }
