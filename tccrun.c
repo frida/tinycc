@@ -1315,8 +1315,8 @@ static void rt_getcontext(ucontext_t *uc, rt_frame *rc)
 #elif defined(__aarch64__) && defined(__APPLE__)
     // see:
     // /Library/Developer/CommandLineTools/SDKs/MacOSX11.1.sdk/usr/include/mach/arm/_structs.h
-    rc->ip = uc->uc_mcontext->__ss.__pc;
-    rc->fp = uc->uc_mcontext->__ss.__fp;
+    rc->ip = __darwin_arm_thread_state64_get_pc(uc->uc_mcontext->__ss);
+    rc->fp = __darwin_arm_thread_state64_get_fp(uc->uc_mcontext->__ss);
 #elif defined(__aarch64__) && defined(__FreeBSD__)
     rc->ip = uc->uc_mcontext.mc_gpregs.gp_elr; /* aka REG_PC */
     rc->fp = uc->uc_mcontext.mc_gpregs.gp_x[29];
