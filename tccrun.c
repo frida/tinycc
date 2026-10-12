@@ -90,11 +90,14 @@ static void *win64_add_function_table(TCCState *s1);
 static void win64_del_function_table(void *);
 #endif
 
+#if defined __APPLE__ && __STDC_HOSTED__
+# include <libkern/OSCacheControl.h>
+#endif
+
 #if !defined PAGESIZE
 # if defined _SC_PAGESIZE
 #  define PAGESIZE sysconf(_SC_PAGESIZE)
 # elif defined __APPLE__ && __STDC_HOSTED__
-#  include <libkern/OSCacheControl.h>
 #  define PAGESIZE getpagesize()
 # else
 #  define PAGESIZE 4096
@@ -509,6 +512,9 @@ static int protect_pages(void *ptr, unsigned long length, int mode)
     if (mode == 0 || mode == 3) {
 #ifdef _WIN32
         FlushInstructionCache(GetCurrentProcess(), ptr, length);
+#elif defined __APPLE__ && __STDC_HOSTED__
+        sys_icache_invalidate(ptr, length);
+        sys_dcache_flush(ptr, length);
 #else
         void __clear_cache(void *beginning, void *end);
         __clear_cache(ptr, (char *)ptr + length);
